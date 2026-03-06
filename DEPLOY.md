@@ -1,5 +1,7 @@
 # Deployment Guide
 
+Chinese version: [DEPLOY.zh-CN.md](DEPLOY.zh-CN.md)
+
 This document explains one-click deployment for local use.
 
 ## Windows

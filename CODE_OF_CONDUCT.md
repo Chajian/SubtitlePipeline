@@ -1,5 +1,7 @@
 # Code of Conduct
 
+Chinese version: [CODE_OF_CONDUCT.zh-CN.md](CODE_OF_CONDUCT.zh-CN.md)
+
 ## Our Standard
 
 We are committed to a respectful and harassment-free community.

@@ -11,6 +11,12 @@ It supports:
 
 Chinese docs:
 - [README.zh-CN.md](README.zh-CN.md)
+- [DEPLOY.zh-CN.md](DEPLOY.zh-CN.md)
+- [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)
+- [CODE_OF_CONDUCT.zh-CN.md](CODE_OF_CONDUCT.zh-CN.md)
+- [SECURITY.zh-CN.md](SECURITY.zh-CN.md)
+- [RELEASE.zh-CN.md](RELEASE.zh-CN.md)
+- [RELEASE_NOTES_TEMPLATE.zh-CN.md](RELEASE_NOTES_TEMPLATE.zh-CN.md)
 
 ## 1. One-Click Deploy
 
@@ -95,13 +101,73 @@ subtitle-pipeline/
     embed.py               # FFmpeg hard-burn and mux
 ```
 
-## 6. Requirements
+## 6. Reference Diagrams
+
+Editable draw.io sources:
+- [docs/diagrams/pipeline-flow.drawio](docs/diagrams/pipeline-flow.drawio)
+- [docs/diagrams/system-architecture.drawio](docs/diagrams/system-architecture.drawio)
+- [docs/diagrams/README.md](docs/diagrams/README.md) (how to add more diagrams)
+
+### Execution Flow
+
+```mermaid
+flowchart LR
+    A[Input video] --> B{--burn-only?}
+    B -- No --> C[Load faster-whisper model]
+    C --> D[Transcribe source speech]
+    D --> E[Translate to English]
+    D --> F[Write *.cn.srt]
+    E --> G[Write *.en.srt]
+    F --> H[Merge *.bilingual.srt]
+    G --> H
+    H --> I{--no-burn?}
+    I -- Yes --> J[Done: SRT outputs]
+    I -- No --> K[FFmpeg hard burn]
+    K --> L[Done: *.hardsub.mp4]
+    B -- Yes --> M[Check FFmpeg + provided SRT]
+    M --> N[Burn subtitles directly]
+    N --> O[Done: *.hardsub.mp4]
+```
+
+### Module Architecture
+
+```mermaid
+flowchart LR
+    A[auto_subtitle.py]
+    B[config.py]
+    C[subtitle/transcribe.py]
+    D[subtitle/srt.py]
+    E[subtitle/embed.py]
+    F[faster-whisper]
+    G[FFmpeg]
+    H[*.cn.srt]
+    I[*.en.srt]
+    J[*.bilingual.srt]
+    K[*.hardsub.mp4]
+
+    A --> C
+    A --> D
+    A --> E
+    B -.-> A
+    B -.-> C
+    B -.-> E
+    C --> F
+    C --> D
+    D --> H
+    D --> I
+    D --> J
+    E --> G
+    J --> E
+    E --> K
+```
+
+## 7. Requirements
 
 - Python 3.10+
 - FFmpeg in `PATH`
 - Optional NVIDIA GPU for faster inference
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 ### FFmpeg not found
 Install FFmpeg and ensure `ffmpeg` is in your shell `PATH`.
@@ -112,11 +178,11 @@ Use a smaller model (`--model small`), or run with GPU.
 ### First run is slow
 `faster-whisper` downloads model files on first use.
 
-## 8. License
+## 9. License
 
 This project is released under the MIT License. See [LICENSE](LICENSE).
 
-## 9. Open Source Collaboration
+## 10. Open Source Collaboration
 
 - Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)

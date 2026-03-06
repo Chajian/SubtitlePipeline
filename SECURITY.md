@@ -1,5 +1,7 @@
 # Security Policy
 
+Chinese version: [SECURITY.zh-CN.md](SECURITY.zh-CN.md)
+
 ## Reporting a Vulnerability
 
 Do not open public issues for sensitive vulnerabilities.

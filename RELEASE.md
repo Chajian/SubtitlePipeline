@@ -1,5 +1,7 @@
 # Release Guide
 
+Chinese version: [RELEASE.zh-CN.md](RELEASE.zh-CN.md)
+
 ## 1. Pre-Release Checklist
 
 1. Ensure docs are up to date:

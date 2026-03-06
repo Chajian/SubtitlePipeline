@@ -1,5 +1,7 @@
 # Release vX.Y.Z
 
+Chinese version: [RELEASE_NOTES_TEMPLATE.zh-CN.md](RELEASE_NOTES_TEMPLATE.zh-CN.md)
+
 ## Highlights
 
 - 
