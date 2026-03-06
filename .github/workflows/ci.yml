@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python syntax check
+        run: |
+          python -m py_compile auto_subtitle.py config.py subtitle/*.py
+
+      - name: CLI help check
+        run: |
+          python auto_subtitle.py --help
+
+      - name: Bash script syntax check
+        run: |
+          bash -n setup.sh
+          bash -n run.sh
