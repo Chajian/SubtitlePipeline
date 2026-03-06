@@ -29,6 +29,8 @@ bash setup.sh
 3. 检查 FFmpeg
 4. 输出可直接运行的命令
 
+在 Windows 上，`setup.ps1` 会优先使用项目级 `mise` Python（当存在 `mise` 与 `.mise.toml`），然后回退到 `py` / `python`。
+
 更多细节见 [DEPLOY.zh-CN.md](DEPLOY.zh-CN.md)。
 
 ## 2. 快速开始
@@ -104,8 +106,15 @@ subtitle-pipeline/
 ## 7. 环境要求
 
 - Python 3.10+
+- 可选：`mise`（推荐用于统一项目 Python 版本）
 - `PATH` 中可用的 FFmpeg
 - 可选：NVIDIA GPU（加速推理）
+
+如果你使用 `mise`，在项目根目录执行：
+```bash
+mise trust .mise.toml
+mise install
+```
 
 ## 8. 常见问题
 

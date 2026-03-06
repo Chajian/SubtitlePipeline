@@ -36,6 +36,8 @@ Both scripts will:
 3. Check FFmpeg
 4. Print runnable commands
 
+On Windows, `setup.ps1` will prefer project-level `mise` Python (when `mise` is available and `.mise.toml` exists), then fall back to `py` / `python`.
+
 For more details, see [DEPLOY.md](DEPLOY.md).
 
 ## 2. Quick Start
@@ -164,8 +166,15 @@ flowchart LR
 ## 7. Requirements
 
 - Python 3.10+
+- Optional: `mise` (recommended for consistent project Python version)
 - FFmpeg in `PATH`
 - Optional NVIDIA GPU for faster inference
+
+If you use `mise`, run in project root:
+```bash
+mise trust .mise.toml
+mise install
+```
 
 ## 8. Troubleshooting
 

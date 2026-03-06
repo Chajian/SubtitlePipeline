@@ -26,6 +26,8 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 .\setup.ps1 -SkipFFmpegInstall
 ```
 
+`setup.ps1` 会优先尝试项目级 `mise` Python（当系统已安装 `mise` 且存在 `.mise.toml`），失败后回退到 `py` / `python`。
+
 ## macOS / Linux
 
 ```bash
@@ -44,6 +46,16 @@ SKIP_FFMPEG_INSTALL=1 bash setup.sh
 3. 从 `requirements.txt` 安装依赖
 4. 检查 FFmpeg，并在可行时尝试自动安装
 5. 输出最终运行命令
+
+## 使用 mise 管理 Python（可选）
+
+本仓库包含项目级 `.mise.toml`。
+
+如果你使用 `mise`，建议在项目根目录先执行：
+```bash
+mise trust .mise.toml
+mise install
+```
 
 ## 部署后运行
 
