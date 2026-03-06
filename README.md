@@ -7,6 +7,10 @@ It supports:
 - English translation
 - Chinese SRT / English SRT / bilingual SRT generation
 - Optional hard-sub burn-in
+- Simplified Chinese aliases (`zh-CN`, `zh-Hans`, `cn`, `chinese`)
+
+Chinese docs:
+- [README.zh-CN.md](README.zh-CN.md)
 
 ## 1. One-Click Deploy
 
@@ -48,17 +52,19 @@ bash run.sh input.mp4 --no-burn
 ```bash
 python auto_subtitle.py input.mp4
 python auto_subtitle.py input.mp4 --model medium --no-burn
+python auto_subtitle.py input.mp4 --source-language zh-CN
 python auto_subtitle.py input.mp4 --burn-only output/input.bilingual.srt
 ```
 
 ## 3. CLI Usage
 
 ```text
-python auto_subtitle.py <video> [--model MODEL] [--output OUTPUT] [--no-burn] [--burn-only SRT]
+python auto_subtitle.py <video> [--model MODEL] [--source-language LANG] [--output OUTPUT] [--no-burn] [--burn-only SRT]
 ```
 
 Key options:
 - `--model`: whisper model size (`tiny/base/small/medium/large-v3`)
+- `--source-language`: input speech language (default: `zh`, supports `zh-CN`, `zh-Hans`, `cn`, `chinese`)
 - `--output`: output folder (default: `output`)
 - `--no-burn`: only generate SRT files
 - `--burn-only`: skip ASR/translation and burn with existing SRT
