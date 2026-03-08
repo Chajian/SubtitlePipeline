@@ -1,6 +1,7 @@
-﻿# Subtitle Pipeline（简体中文）
+# Subtitle Pipeline（简体中文）
 
 英文版：[README.md](README.md)
+快速使用（推荐先看）：[QUICKSTART.zh-CN.md](QUICKSTART.zh-CN.md)
 
 基于 `faster-whisper` 和 `FFmpeg` 的独立字幕流水线。
 
@@ -53,19 +54,26 @@ bash run.sh input.mp4 --no-burn
 ```bash
 python auto_subtitle.py input.mp4
 python auto_subtitle.py input.mp4 --model medium --no-burn
+python auto_subtitle.py input.mp4 --model-source auto --mirror-endpoint https://hf-mirror.com
+python auto_subtitle.py input.mp4 --model-source local --model-dir ./models --no-burn
 python auto_subtitle.py input.mp4 --source-language zh-CN
+python auto_subtitle.py input.mp4 --source-language zh-CN --zh-script simplified
 python auto_subtitle.py input.mp4 --burn-only output/input.bilingual.srt
 ```
 
 ## 3. CLI 用法
 
 ```text
-python auto_subtitle.py <video> [--model MODEL] [--source-language LANG] [--output OUTPUT] [--no-burn] [--burn-only SRT]
+python auto_subtitle.py <video> [--model MODEL] [--model-source MODE] [--model-dir DIR] [--mirror-endpoint URL] [--source-language LANG] [--zh-script SCRIPT] [--output OUTPUT] [--no-burn] [--burn-only SRT]
 ```
 
 关键参数：
 - `--model`：whisper 模型大小（`tiny/base/small/medium/large-v3`）
+- `--model-source`：模型来源策略（`auto/official/mirror/local`）
+- `--model-dir`：模型目录（可作为本地模型目录或下载缓存目录）
+- `--mirror-endpoint`：`mirror/auto` 模式下的镜像端点（如 `https://hf-mirror.com`）
 - `--source-language`：输入语音语言（默认 `zh`，支持 `zh-CN`、`zh-Hans`、`cn`、`chinese`）
+- `--zh-script`：中文字幕字形（`simplified`/`traditional`/`raw`，默认 `simplified`）
 - `--output`：输出目录（默认 `output`）
 - `--no-burn`：只生成 SRT，不烧录视频
 - `--burn-only`：跳过识别/翻译，直接使用现有 SRT 烧录
@@ -127,6 +135,20 @@ mise install
 ### 首次运行较慢
 `faster-whisper` 首次运行会下载模型文件。
 
+### 首次运行直接失败（网络超时 / 无法下载模型）
+`faster-whisper` 需要从 Hugging Face 下载模型文件。请确认当前网络可访问 Hugging Face，或配置可用代理后重试。  
+可先使用更小模型验证流程：
+```bash
+python auto_subtitle.py input.mp4 --model tiny --no-burn
+```
+
+### 中国大陆网络建议
+优先使用镜像模式，或直接使用本地模型：
+```bash
+python auto_subtitle.py input.mp4 --model tiny --model-source auto --mirror-endpoint https://hf-mirror.com --no-burn
+python auto_subtitle.py input.mp4 --model-source local --model-dir ./models --no-burn
+```
+
 ## 9. 许可证
 
 本项目采用 MIT License，详见 [LICENSE](LICENSE)。
@@ -137,3 +159,4 @@ mise install
 - 行为准则：[CODE_OF_CONDUCT.zh-CN.md](CODE_OF_CONDUCT.zh-CN.md)
 - 安全策略：[SECURITY.zh-CN.md](SECURITY.zh-CN.md)
 - 发布流程：[RELEASE.zh-CN.md](RELEASE.zh-CN.md)
+
