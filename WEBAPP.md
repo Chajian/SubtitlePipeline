@@ -41,9 +41,12 @@ docker compose up -d --build
 
 The service stores runtime data in `web_data/`.
 
+If you want to publish on a different host port, set `WEB_HOST_PORT` in your shell or `.env`.
+
 ## Environment Variables
 
 - `WEB_DAILY_QUOTA`: global anonymous jobs per day
+- `WEB_HOST_PORT`: published host port for Docker Compose
 - `WEB_MAX_UPLOAD_MB`: max upload size in megabytes
 - `WEB_MAX_QUEUE_SIZE`: max queued jobs
 - `WEB_JOB_TIMEOUT_SECONDS`: timeout for each job

@@ -44,9 +44,12 @@ docker compose up -d --build
 - `uploads/`：上传原始视频
 - `jobs/<job-id>/`：日志和输出文件
 
+如果你想把宿主机端口改成 `7500` 这类非默认值，请在运行 `docker compose` 前额外设置 `WEB_HOST_PORT`，或写入仓库根目录 `.env` 文件。
+
 ## 关键环境变量
 
 - `WEB_DAILY_QUOTA`：匿名总额度
+- `WEB_HOST_PORT`：Docker Compose 对外暴露的宿主机端口
 - `WEB_MAX_UPLOAD_MB`：单文件最大体积
 - `WEB_MAX_QUEUE_SIZE`：最大排队任务数
 - `WEB_JOB_TIMEOUT_SECONDS`：单任务超时时间
