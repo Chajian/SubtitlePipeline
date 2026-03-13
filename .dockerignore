@@ -1,0 +1,11 @@
+.git
+.idea
+.tmp
+.venv
+__pycache__
+output
+web_data
+*.pyc
+*.pyo
+*.pyd
+2026-03-08 20-45-26.mp4

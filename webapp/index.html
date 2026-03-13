@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Subtitle Pipeline Web</title>
+  <style>
+    :root {
+      --bg: #f5efe4;
+      --paper: rgba(255, 252, 246, 0.92);
+      --ink: #1d2430;
+      --muted: #5a6573;
+      --accent: #cc5c33;
+      --accent-strong: #9a3d1d;
+      --teal: #116466;
+      --line: rgba(29, 36, 48, 0.12);
+      --shadow: 0 20px 60px rgba(29, 36, 48, 0.12);
+      --radius: 24px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Aptos", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(204, 92, 51, 0.24), transparent 38%),
+        radial-gradient(circle at top right, rgba(17, 100, 102, 0.22), transparent 32%),
+        linear-gradient(180deg, #fff8ed 0%, var(--bg) 100%);
+      min-height: 100vh;
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 32px auto 48px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.25fr 0.9fr;
+      gap: 20px;
+      align-items: stretch;
+      margin-bottom: 20px;
+    }
+
+    .panel {
+      background: var(--paper);
+      border: 1px solid rgba(255, 255, 255, 0.45);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+
+    .hero-copy {
+      padding: 28px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-copy::after {
+      content: "";
+      position: absolute;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      right: -60px;
+      top: -40px;
+      background: linear-gradient(180deg, rgba(204, 92, 51, 0.2), rgba(17, 100, 102, 0.16));
+      filter: blur(6px);
+    }
+
+    .eyebrow {
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent-strong);
+      margin-bottom: 12px;
+      font-weight: 700;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(32px, 5vw, 52px);
+      line-height: 0.95;
+      max-width: 10ch;
+      font-family: Georgia, "Times New Roman", serif;
+    }
+
+    .hero-copy p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.7;
+      max-width: 48ch;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+      padding: 20px;
+    }
+
+    .status-card {
+      padding: 18px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid var(--line);
+    }
+
+    .status-card strong {
+      display: block;
+      font-size: 28px;
+      margin-top: 10px;
+      color: var(--teal);
+    }
+
+    .status-card span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .form-panel,
+    .result-panel {
+      padding: 24px;
+    }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      margin-bottom: 18px;
+    }
+
+    .section-title h2 {
+      margin: 0;
+      font-size: 22px;
+    }
+
+    .section-title small {
+      color: var(--muted);
+    }
+
+    .field { margin-bottom: 16px; }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    input[type="file"],
+    select {
+      width: 100%;
+      padding: 14px 16px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.88);
+      color: var(--ink);
+      font: inherit;
+    }
+
+    .toggle-row {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .toggle {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.82);
+    }
+
+    .toggle input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+    }
+
+    .toggle strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .toggle span {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    button {
+      width: 100%;
+      padding: 15px 18px;
+      border: none;
+      border-radius: 18px;
+      background: linear-gradient(135deg, var(--accent), #e07a3b);
+      color: white;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.18s ease, box-shadow 0.18s ease;
+      box-shadow: 0 16px 30px rgba(204, 92, 51, 0.28);
+    }
+
+    button:hover:not(:disabled) { transform: translateY(-1px); }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    .hint,
+    .meta {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .job-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(17, 100, 102, 0.12);
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .job-chip.failed {
+      background: rgba(154, 61, 29, 0.12);
+      color: var(--accent-strong);
+    }
+
+    .job-chip.running {
+      background: rgba(204, 92, 51, 0.12);
+      color: var(--accent-strong);
+    }
+
+    .result-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .file-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 14px 16px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.84);
+    }
+
+    .file-row a {
+      color: var(--accent-strong);
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    pre {
+      margin: 16px 0 0;
+      min-height: 220px;
+      max-height: 360px;
+      overflow: auto;
+      border-radius: 18px;
+      padding: 18px;
+      background: #1e2530;
+      color: #e6edf5;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      border: 1px solid rgba(17, 100, 102, 0.18);
+    }
+
+    .empty {
+      padding: 18px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.64);
+      border: 1px dashed var(--line);
+      color: var(--muted);
+    }
+
+    .error {
+      margin-top: 16px;
+      color: var(--accent-strong);
+      font-weight: 600;
+    }
+
+    @media (max-width: 920px) {
+      .hero,
+      .grid { grid-template-columns: 1fr; }
+      .toggle-row,
+      .status-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <article class="panel hero-copy">
+        <div class="eyebrow">Subtitle Pipeline Web</div>
+        <h1>上传视频，直接取回字幕结果</h1>
+        <p>这是一个对外开放的字幕处理网页壳。你不需要本地安装 Python、FFmpeg 或模型环境，直接在浏览器上传视频，等待队列处理后下载字幕或成品视频即可。</p>
+      </article>
+      <aside class="panel status-grid">
+        <div class="status-card">
+          <span>今日剩余额度</span>
+          <strong id="quota-remaining">-</strong>
+        </div>
+        <div class="status-card">
+          <span>今日总额度</span>
+          <strong id="quota-total">-</strong>
+        </div>
+        <div class="status-card">
+          <span>排队任务</span>
+          <strong id="queue-length">-</strong>
+        </div>
+        <div class="status-card">
+          <span>当前运行</span>
+          <strong id="running-jobs">-</strong>
+        </div>
+      </aside>
+    </section>
+
+    <section class="grid">
+      <section class="panel form-panel">
+        <div class="section-title">
+          <h2>创建任务</h2>
+          <small id="accepting-text">加载中</small>
+        </div>
+
+        <form id="job-form">
+          <div class="field">
+            <label for="video">视频文件</label>
+            <input id="video" name="video" type="file" accept=".mp4,.mov,.mkv,.avi" required>
+            <div class="hint" id="upload-hint">支持 mp4 / mov / mkv / avi</div>
+          </div>
+
+          <div class="field">
+            <label for="model">模型大小</label>
+            <select id="model" name="model">
+              <option value="small">small</option>
+              <option value="medium" selected>medium</option>
+              <option value="large-v3">large-v3</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="zh_script">中文字幕格式</label>
+            <select id="zh_script" name="zh_script">
+              <option value="simplified" selected>简体</option>
+              <option value="traditional">繁体</option>
+            </select>
+          </div>
+
+          <div class="field toggle-row">
+            <label class="toggle" for="burn_subtitles">
+              <input id="burn_subtitles" name="burn_subtitles" type="checkbox">
+              <span>
+                <strong>烧录字幕</strong>
+                <span>生成带硬字幕的视频，耗时更长</span>
+              </span>
+            </label>
+            <label class="toggle" for="ai_review">
+              <input id="ai_review" name="ai_review" type="checkbox">
+              <span>
+                <strong>AI Review</strong>
+                <span>提升字幕表述质量，耗时和成本更高</span>
+              </span>
+            </label>
+          </div>
+
+          <button id="submit-button" type="submit">提交处理任务</button>
+        </form>
+
+        <p class="meta">匿名模式按全站总额度控制。任务入队即消耗额度，失败不会返还。</p>
+        <div class="error" id="form-error"></div>
+      </section>
+
+      <section class="panel result-panel">
+        <div class="section-title">
+          <h2>当前任务</h2>
+          <div id="job-chip" class="job-chip">未创建任务</div>
+        </div>
+
+        <div id="job-meta" class="meta">提交后会显示当前任务的排队、处理和下载信息。</div>
+        <div id="download-list" class="result-list"></div>
+        <div id="error-box" class="error"></div>
+        <pre id="log-box">等待任务日志...</pre>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById("job-form");
+    const submitButton = document.getElementById("submit-button");
+    const formError = document.getElementById("form-error");
+    const quotaRemaining = document.getElementById("quota-remaining");
+    const quotaTotal = document.getElementById("quota-total");
+    const queueLength = document.getElementById("queue-length");
+    const runningJobs = document.getElementById("running-jobs");
+    const acceptingText = document.getElementById("accepting-text");
+    const uploadHint = document.getElementById("upload-hint");
+    const jobChip = document.getElementById("job-chip");
+    const jobMeta = document.getElementById("job-meta");
+    const downloadList = document.getElementById("download-list");
+    const errorBox = document.getElementById("error-box");
+    const logBox = document.getElementById("log-box");
+
+    let currentJobId = window.localStorage.getItem("subtitleJobId") || "";
+    let jobTimer = null;
+
+    function setJobChip(text, type = "") {
+      jobChip.textContent = text;
+      jobChip.className = "job-chip";
+      if (type) {
+        jobChip.classList.add(type);
+      }
+    }
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    function renderFiles(files) {
+      downloadList.innerHTML = "";
+      if (!files || files.length === 0) {
+        downloadList.innerHTML = '<div class="empty">任务完成后，这里会列出可下载的字幕和视频文件。</div>';
+        return;
+      }
+      for (const file of files) {
+        const row = document.createElement("div");
+        row.className = "file-row";
+        row.innerHTML = `
+          <div>
+            <strong>${file.name}</strong><br>
+            <span class="meta">${formatSize(file.size_bytes)}</span>
+          </div>
+          <a href="${file.url}" target="_blank" rel="noopener">下载</a>
+        `;
+        downloadList.appendChild(row);
+      }
+    }
+
+    async function loadStatus() {
+      const response = await fetch("/api/public/status");
+      const data = await response.json();
+      quotaRemaining.textContent = data.remaining_quota;
+      quotaTotal.textContent = data.daily_quota;
+      queueLength.textContent = data.queue_length;
+      runningJobs.textContent = data.running_jobs;
+      acceptingText.textContent = data.accepting_jobs ? "当前可提交" : "当前不可提交";
+      uploadHint.textContent = `支持 mp4 / mov / mkv / avi，最大 ${data.max_upload_mb} MB`;
+      submitButton.disabled = !data.accepting_jobs;
+    }
+
+    async function loadJob(jobId) {
+      const response = await fetch(`/api/jobs/${jobId}`);
+      if (response.status === 404) {
+        window.localStorage.removeItem("subtitleJobId");
+        currentJobId = "";
+        setJobChip("任务已过期");
+        jobMeta.textContent = "任务记录已被清理。";
+        renderFiles([]);
+        logBox.textContent = "任务日志不可用。";
+        stopJobPolling();
+        return;
+      }
+
+      const data = await response.json();
+      const chipType = data.status === "failed" ? "failed" : (data.status === "running" ? "running" : "");
+      setJobChip(`${data.status.toUpperCase()} · ${data.job_id}`, chipType);
+      jobMeta.textContent = `${data.original_filename} | 模型 ${data.options.model} | ${data.options.burn_subtitles ? "烧录开启" : "仅输出字幕"} | ${data.options.ai_review ? "AI Review 开启" : "AI Review 关闭"}`;
+      errorBox.textContent = data.error_text || "";
+      logBox.textContent = data.log_tail || "等待任务日志...";
+      renderFiles(data.files);
+
+      if (data.status === "succeeded" || data.status === "failed") {
+        stopJobPolling();
+      }
+    }
+
+    function stopJobPolling() {
+      if (jobTimer) {
+        window.clearInterval(jobTimer);
+        jobTimer = null;
+      }
+    }
+
+    function startJobPolling(jobId) {
+      stopJobPolling();
+      currentJobId = jobId;
+      window.localStorage.setItem("subtitleJobId", jobId);
+      loadJob(jobId);
+      jobTimer = window.setInterval(() => loadJob(jobId), 3000);
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      formError.textContent = "";
+      errorBox.textContent = "";
+      renderFiles([]);
+      logBox.textContent = "任务已提交，等待处理...";
+      submitButton.disabled = true;
+
+      try {
+        const response = await fetch("/api/jobs", {
+          method: "POST",
+          body: new FormData(form),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.detail || "任务创建失败");
+        }
+
+        startJobPolling(data.job_id);
+        setJobChip(`QUEUED · ${data.job_id}`);
+      } catch (error) {
+        formError.textContent = error.message || "任务创建失败";
+      } finally {
+        await loadStatus();
+      }
+    });
+
+    async function bootstrap() {
+      renderFiles([]);
+      await loadStatus();
+      if (currentJobId) {
+        startJobPolling(currentJobId);
+      }
+      window.setInterval(loadStatus, 5000);
+    }
+
+    bootstrap();
+  </script>
+</body>
+</html>
