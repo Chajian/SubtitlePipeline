@@ -1,5 +1,10 @@
 .venv/
 output/
+.tmp/
+.env.ai-review.local
+.env.ai-review.openai.local
+.env.ai-review.siliconflow.local
+.idea/
 __pycache__/
 *.pyc
 *.pyo

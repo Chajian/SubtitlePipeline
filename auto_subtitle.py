@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -12,6 +13,10 @@ if sys.platform == "win32":
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from subtitle.env_loader import bootstrap_ai_review_env
+
+bootstrap_ai_review_env(Path(__file__).resolve().parent)
 
 try:
     from opencc import OpenCC  # type: ignore
@@ -47,17 +52,19 @@ def parse_args() -> argparse.Namespace:
         epilog=(
             "Examples:\n"
             "  python auto_subtitle.py input.mp4\n"
-            "  python auto_subtitle.py input.mp4 --model medium --no-burn\n"
+            "  python auto_subtitle.py input.mp4 --model small --no-burn\n"
             "  python auto_subtitle.py input.mp4 --model-source auto --mirror-endpoint https://hf-mirror.com\n"
             "  python auto_subtitle.py input.mp4 --model-source local --model-dir ./models\n"
             "  python auto_subtitle.py input.mp4 --source-language zh-CN --zh-script simplified\n"
+            "  python auto_subtitle.py input.mp4 --ai-review on --ai-review-provider openai --ai-review-model gpt-4.1-mini\n"
+            "  python auto_subtitle.py input.mp4 --ai-review on --ai-review-provider siliconflow --ai-review-model Qwen/Qwen2.5-72B-Instruct\n"
             "  python auto_subtitle.py input.mp4 --burn-only output/input.bilingual.srt\n"
         ),
     )
     parser.add_argument("video", help="Input video path")
     parser.add_argument(
         "--model",
-        default="large-v3",
+        default="medium",
         help="Whisper model size (tiny/base/small/medium/large-v3)",
     )
     parser.add_argument(
@@ -91,6 +98,28 @@ def parse_args() -> argparse.Namespace:
         "--output",
         default="output",
         help="Output directory (default: output)",
+    )
+    parser.add_argument(
+        "--ai-review",
+        default=os.getenv("AI_REVIEW_MODE", "auto"),
+        choices=["auto", "on", "off"],
+        help="Review bilingual subtitles with the selected AI provider (default: auto)",
+    )
+    parser.add_argument(
+        "--ai-review-provider",
+        default=os.getenv("AI_REVIEW_PROVIDER", "codex"),
+        choices=["codex", "openai", "siliconflow"],
+        help="AI review provider (default: codex)",
+    )
+    parser.add_argument(
+        "--ai-review-model",
+        default=os.getenv("AI_REVIEW_MODEL"),
+        help="Optional model override for subtitle review",
+    )
+    parser.add_argument(
+        "--ai-review-base-url",
+        default=os.getenv("AI_REVIEW_BASE_URL"),
+        help="Optional OpenAI-compatible base URL override for subtitle review",
     )
     parser.add_argument(
         "--no-burn",
@@ -137,11 +166,22 @@ def main() -> None:
     config.MODEL_DIR = args.model_dir
     config.MODEL_MIRROR_ENDPOINT = args.mirror_endpoint
     config.CHINESE_SCRIPT = args.zh_script
+    config.AI_REVIEW_MODE = args.ai_review
+    config.AI_REVIEW_PROVIDER = args.ai_review_provider
+    config.AI_REVIEW_MODEL = args.ai_review_model
+    config.AI_REVIEW_BASE_URL = args.ai_review_base_url
 
+    from subtitle.ai_review import (
+        AIReviewSettings,
+        maybe_review_bilingual_srt,
+        maybe_review_text_segments,
+        translate_text_segments_to_english,
+    )
     from subtitle.srt import merge_bilingual, segments_to_srt
     from subtitle.transcribe import preflight_model_access, transcribe_speech, translate_to_english
 
     stem = video.stem
+    total_steps = 6 if args.ai_review != "off" else 4
 
     if not args.no_burn:
         check_ffmpeg()
@@ -158,13 +198,19 @@ def main() -> None:
         print(f"\033[1;35m  Model dir: {args.model_dir}\033[0m")
     if args.mirror_endpoint:
         print(f"\033[1;35m  Mirror endpoint: {args.mirror_endpoint}\033[0m")
+    print(f"\033[1;35m  AI review: {args.ai_review}\033[0m")
+    print(f"\033[1;35m  AI review provider: {args.ai_review_provider}\033[0m")
+    if args.ai_review_model:
+        print(f"\033[1;35m  AI review model: {args.ai_review_model}\033[0m")
+    if args.ai_review_base_url:
+        print(f"\033[1;35m  AI review base URL: {args.ai_review_base_url}\033[0m")
     print("\033[1;35m" + "=" * 50 + "\033[0m")
 
     try:
         print("\n\033[1;36m> Preflight model/network\033[0m")
         preflight_model_access()
 
-        print("\n\033[1;36m> Step 1/4: transcribe source speech\033[0m")
+        print(f"\n\033[1;36m> Step 1/{total_steps}: transcribe source speech\033[0m")
         cn_segments = transcribe_speech(str(video), source_language=args.source_language)
         source_lang = args.source_language.strip().lower().replace("_", "-")
         is_zh_source = source_lang in {"zh", "zh-cn", "zh-hans", "cn", "chinese"} or source_lang.startswith("zh-")
@@ -173,22 +219,74 @@ def main() -> None:
             cn_segments = _convert_zh_segments(cn_segments, args.zh_script)
         cn_srt = output_dir / f"{stem}.cn.srt"
         segments_to_srt(cn_segments, cn_srt)
+        reviewed_cn_srt = output_dir / f"{stem}.cn.reviewed.srt"
+        active_cn_segments = cn_segments
+        ai_cn_review_applied = False
 
-        print("\n\033[1;36m> Step 2/4: translate to english\033[0m")
-        en_segments = translate_to_english(str(video), source_language=args.source_language)
+        review_settings = AIReviewSettings(
+            mode=config.AI_REVIEW_MODE,
+            provider=config.AI_REVIEW_PROVIDER,
+            command=config.AI_REVIEW_COMMAND,
+            model=config.AI_REVIEW_MODEL,
+            base_url=config.AI_REVIEW_BASE_URL,
+            max_blocks_per_chunk=config.AI_REVIEW_MAX_BLOCKS_PER_CHUNK,
+            max_chars_per_chunk=config.AI_REVIEW_MAX_CHARS_PER_CHUNK,
+            timeout_seconds=config.AI_REVIEW_TIMEOUT_SECONDS,
+            max_attempts=config.AI_REVIEW_MAX_ATTEMPTS,
+        )
+
+        if args.ai_review != "off":
+            print(f"\n\033[1;36m> Step 2/{total_steps}: review Chinese subtitles\033[0m")
+            active_cn_segments, ai_cn_review_applied = maybe_review_text_segments(
+                cn_segments,
+                reviewed_cn_srt,
+                review_settings,
+            )
+
+        if args.ai_review != "off":
+            print(f"\n\033[1;36m> Step 3/{total_steps}: translate reviewed Chinese subtitles to english\033[0m")
+            try:
+                en_segments = translate_text_segments_to_english(active_cn_segments, review_settings)
+            except Exception as exc:  # noqa: BLE001
+                if args.ai_review in {"on", "auto"}:
+                    print(
+                        "\033[33m[AI]\033[0m Reviewed-text English translation failed; "
+                        "falling back to Whisper audio translation."
+                    )
+                    print(f"\033[33m[AI]\033[0m Reason: {exc}")
+                    en_segments = translate_to_english(str(video), source_language=args.source_language)
+                else:
+                    raise
+        else:
+            print(f"\n\033[1;36m> Step 2/{total_steps}: translate to english\033[0m")
+            en_segments = translate_to_english(str(video), source_language=args.source_language)
         en_srt = output_dir / f"{stem}.en.srt"
         segments_to_srt(en_segments, en_srt)
 
-        print("\n\033[1;36m> Step 3/4: merge bilingual subtitles\033[0m")
+        merge_step = 4 if args.ai_review != "off" else 3
+        print(f"\n\033[1;36m> Step {merge_step}/{total_steps}: merge bilingual subtitles\033[0m")
         bilingual_srt = output_dir / f"{stem}.bilingual.srt"
-        merge_bilingual(cn_segments, en_segments, bilingual_srt)
+        merge_bilingual(active_cn_segments, en_segments, bilingual_srt)
+        reviewed_srt = output_dir / f"{stem}.bilingual.reviewed.srt"
+        active_bilingual_srt = bilingual_srt
+        ai_bilingual_review_applied = False
+
+        if args.ai_review != "off":
+            print(f"\n\033[1;36m> Step 5/{total_steps}: optional bilingual subtitle review\033[0m")
+            active_bilingual_srt, ai_bilingual_review_applied = maybe_review_bilingual_srt(
+                bilingual_srt,
+                reviewed_srt,
+                review_settings,
+            )
+
+        burn_step = total_steps
 
         output_video = output_dir / f"{stem}.hardsub.mp4"
         if args.no_burn:
-            print("\n\033[1;33m> Step 4/4: skip burn (--no-burn)\033[0m")
+            print(f"\n\033[1;33m> Step {burn_step}/{total_steps}: skip burn (--no-burn)\033[0m")
         else:
-            print("\n\033[1;36m> Step 4/4: burn hard subtitles\033[0m")
-            burn_subtitles(str(video), str(bilingual_srt), str(output_video))
+            print(f"\n\033[1;36m> Step {burn_step}/{total_steps}: burn hard subtitles\033[0m")
+            burn_subtitles(str(video), str(active_bilingual_srt), str(output_video))
 
     except KeyboardInterrupt:
         print("\n\033[31m[interrupted]\033[0m cancelled by user")
@@ -203,9 +301,20 @@ def main() -> None:
     print("\033[1;32m  Completed\033[0m")
     print(f"\033[1;32m  Output dir: {output_dir.resolve()}\033[0m")
     print(f"  Chinese SRT:   {cn_srt}")
+    if args.ai_review != "off":
+        if ai_cn_review_applied:
+            print(f"  Reviewed CN:   {reviewed_cn_srt}")
+        else:
+            print("  Reviewed CN:   skipped (using raw Chinese SRT)")
     print(f"  English SRT:   {en_srt}")
     print(f"  Bilingual SRT: {bilingual_srt}")
+    if args.ai_review != "off":
+        if ai_bilingual_review_applied:
+            print(f"  Reviewed SRT:  {active_bilingual_srt}")
+        else:
+            print("  Reviewed SRT:  skipped (using raw bilingual SRT)")
     if not args.no_burn:
+        print(f"  Burn source:   {active_bilingual_srt}")
         print(f"  Hard-sub video: {output_video}")
     print("\033[1;32m" + "=" * 50 + "\033[0m")
 

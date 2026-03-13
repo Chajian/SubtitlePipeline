@@ -8,7 +8,8 @@ import sys
 
 # On Windows, add NVIDIA runtime DLL paths installed by pip packages.
 if sys.platform == "win32":
-    site_packages = os.path.join(os.path.dirname(sys.executable), "Lib", "site-packages", "nvidia")
+    venv_root = os.path.dirname(os.path.dirname(sys.executable))
+    site_packages = os.path.join(venv_root, "Lib", "site-packages", "nvidia")
     for bin_dir in glob.glob(os.path.join(site_packages, "*", "bin")):
         os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
 
@@ -21,11 +22,11 @@ except Exception:
     DEVICE = "cpu"
 
 # Whisper model config.
-MODEL_SIZE = "large-v3"  # tiny / base / small / medium / large-v3
+MODEL_SIZE = "medium"  # tiny / base / small / medium / large-v3
 MODEL_SOURCE = "auto"  # auto / official / mirror / local
 MODEL_DIR = None  # optional cache dir or local model dir
 MODEL_MIRROR_ENDPOINT = None  # e.g. https://hf-mirror.com
-COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"
+COMPUTE_TYPE = "int8_float16" if DEVICE == "cuda" else "int8"
 
 # Input speech language.
 SOURCE_LANGUAGE = "zh"
@@ -34,6 +35,17 @@ CHINESE_SCRIPT = "simplified"
 
 # Outputs.
 OUTPUT_DIR = "output"
+
+# AI subtitle review.
+AI_REVIEW_MODE = "auto"  # auto / on / off
+AI_REVIEW_PROVIDER = "codex"  # codex / openai / siliconflow
+AI_REVIEW_COMMAND = "codex"
+AI_REVIEW_MODEL = None  # optional codex model override
+AI_REVIEW_BASE_URL = None  # optional OpenAI-compatible API base URL override
+AI_REVIEW_MAX_BLOCKS_PER_CHUNK = 80
+AI_REVIEW_MAX_CHARS_PER_CHUNK = 12_000
+AI_REVIEW_TIMEOUT_SECONDS = 600
+AI_REVIEW_MAX_ATTEMPTS = 2
 
 # Hard subtitle style (ASS force_style fields).
 SUBTITLE_STYLE = {
