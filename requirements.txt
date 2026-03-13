@@ -2,3 +2,6 @@ faster-whisper
 nvidia-cublas-cu12
 nvidia-cudnn-cu12==9.*
 opencc-python-reimplemented>=0.1.7
+fastapi>=0.116,<1
+uvicorn>=0.35,<1
+python-multipart>=0.0.20,<1
