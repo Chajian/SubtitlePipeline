@@ -67,15 +67,23 @@ Expected success logs include:
 run.bat "input.mp4" --model tiny --model-source auto --mirror-endpoint https://hf-mirror.com
 ```
 
+## 4) Merge soft subtitles with ASR (time-stamped text)
+
+```bat
+run.bat "input.mp4" --merge-mode ai --subtitle-track auto --output-format both --text-only
+```
+
 Outputs in `output/`:
 - `*.cn.srt`
 - `*.cn.reviewed.srt` (when Chinese AI review succeeds)
 - `*.en.srt`
 - `*.bilingual.srt` (subtitle mapping/alignment result)
 - `*.bilingual.reviewed.srt` (when AI review succeeds)
+- `*.merged.srt` (when merge mode is enabled)
+- `*.merged.txt` (when merge mode is enabled)
 - `*.hardsub.mp4` (without `--no-burn`)
 
-## 4) Quick troubleshooting
+## 5) Quick troubleshooting
 
 ### Model source preflight failed
 Your network cannot reach model source.

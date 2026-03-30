@@ -13,6 +13,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 from uuid import uuid4
 
+from subtitle.merge import AlignedBlock
 from subtitle.srt import format_time, parse_srt
 
 
@@ -210,6 +211,33 @@ def maybe_review_bilingual_srt(
     return target_path, True
 
 
+def merge_aligned_blocks(
+    blocks: list[AlignedBlock],
+    settings: AIReviewSettings,
+) -> list[tuple[float, float, str]]:
+    """Merge aligned ASR/SRT blocks via AI while preserving timestamps."""
+    if not blocks:
+        raise RuntimeError("no aligned blocks found for AI merge")
+
+    chunks = list(
+        _chunk_merge_blocks(
+            blocks,
+            max_blocks=settings.max_blocks_per_chunk,
+            max_chars=settings.max_chars_per_chunk,
+        )
+    )
+    merged_segments: list[tuple[float, float, str]] = []
+    total_chunks = len(chunks)
+    for chunk_index, chunk in enumerate(chunks, start=1):
+        print(
+            f"\033[36m[AI]\033[0m Merging subtitle chunk "
+            f"{chunk_index}/{total_chunks} ({len(chunk)} blocks)"
+        )
+        merged_segments.extend(_merge_text_chunk(chunk, settings))
+
+    return merged_segments
+
+
 def review_text_blocks(
     original_blocks: list[SubtitleTextBlock],
     settings: AIReviewSettings,
@@ -337,6 +365,30 @@ def _chunk_bilingual_blocks(
         yield current_chunk
 
 
+def _chunk_merge_blocks(
+    blocks: list[AlignedBlock],
+    *,
+    max_blocks: int,
+    max_chars: int,
+) -> Iterable[list[AlignedBlock]]:
+    current_chunk: list[AlignedBlock] = []
+    current_chars = 0
+    for block in blocks:
+        block_chars = len(block.asr_text) + len(block.srt_text) + 48
+        hit_block_limit = len(current_chunk) >= max_blocks
+        hit_char_limit = current_chunk and current_chars + block_chars > max_chars
+        if hit_block_limit or hit_char_limit:
+            yield current_chunk
+            current_chunk = []
+            current_chars = 0
+
+        current_chunk.append(block)
+        current_chars += block_chars
+
+    if current_chunk:
+        yield current_chunk
+
+
 def _review_text_chunk(
     chunk: list[SubtitleTextBlock],
     settings: AIReviewSettings,
@@ -371,6 +423,22 @@ def _review_bilingual_chunk(
     prompt = _build_bilingual_review_prompt(chunk)
     response = _run_json_task(prompt, schema, settings, action_label="bilingual subtitle review")
     return _validate_bilingual_review_response(chunk, response)
+
+
+def _merge_text_chunk(
+    chunk: list[AlignedBlock],
+    settings: AIReviewSettings,
+) -> list[tuple[float, float, str]]:
+    schema = _merge_schema()
+    prompt = _build_merge_prompt(chunk)
+    response = _run_json_task(
+        prompt,
+        schema,
+        settings,
+        action_label="subtitle merge",
+        validator=lambda payload: _validate_merge_response(chunk, payload),
+    )
+    return _validate_merge_response(chunk, response)
 
 
 def _run_json_task(
@@ -632,6 +700,28 @@ def _bilingual_review_schema() -> dict[str, object]:
     }
 
 
+def _merge_schema() -> dict[str, object]:
+    return {
+        "type": "object",
+        "properties": {
+            "blocks": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "index": {"type": "integer"},
+                        "merged_text": {"type": "string"},
+                    },
+                    "required": ["index", "merged_text"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["blocks"],
+        "additionalProperties": False,
+    }
+
+
 def _build_text_review_prompt(chunk: list[SubtitleTextBlock]) -> str:
     payload = {"blocks": [{"index": block.index, "text": block.text} for block in chunk]}
     return (
@@ -697,6 +787,32 @@ def _build_bilingual_review_prompt(chunk: list[BilingualSubtitleBlock]) -> str:
         "5. `english_text` must stay in English.\n"
         "6. Keep every field to a single subtitle line. No newline characters.\n"
         "7. Return JSON only.\n\n"
+        f"Input:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
+    )
+
+
+def _build_merge_prompt(chunk: list[AlignedBlock]) -> str:
+    payload = {
+        "blocks": [
+            {
+                "index": block.index,
+                "start": format_time(block.start),
+                "end": format_time(block.end),
+                "asr_text": block.asr_text,
+                "srt_text": block.srt_text,
+            }
+            for block in chunk
+        ]
+    }
+    return (
+        "Merge ASR text and soft subtitle text into a single subtitle line per block.\n"
+        "Rules:\n"
+        "1. Keep the same block count and same indices.\n"
+        "2. Preserve meaning, but you may rewrite for clarity and fluency.\n"
+        "3. Use the best parts of ASR and soft subtitles; avoid duplication.\n"
+        "4. Keep each merged subtitle to a single line. No newline characters.\n"
+        "5. Keep the language as-is (may be bilingual).\n"
+        "6. Return JSON only.\n\n"
         f"Input:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
     )
 
@@ -810,6 +926,36 @@ def _validate_bilingual_review_response(
         )
 
     return reviewed
+
+
+def _validate_merge_response(
+    original_chunk: list[AlignedBlock],
+    response: dict[str, object],
+) -> list[tuple[float, float, str]]:
+    raw_blocks = response.get("blocks")
+    if not isinstance(raw_blocks, list):
+        raise ValueError("AI response is missing `blocks` array")
+    if len(raw_blocks) != len(original_chunk):
+        raise ValueError(f"expected {len(original_chunk)} merged blocks, got {len(raw_blocks)}")
+
+    merged: list[tuple[float, float, str]] = []
+    for original, candidate in zip(original_chunk, raw_blocks, strict=True):
+        if not isinstance(candidate, dict):
+            raise ValueError("AI returned a non-object subtitle block")
+
+        merged_index = candidate.get("index")
+        if merged_index != original.index:
+            raise ValueError(
+                f"subtitle block index mismatch: expected {original.index}, got {merged_index}"
+            )
+
+        merged_text = _sanitize_subtitle_line(candidate.get("merged_text"))
+        if not merged_text:
+            raise ValueError(f"subtitle block {original.index} has empty merged_text")
+
+        merged.append((original.start, original.end, merged_text))
+
+    return merged
 
 
 def _extract_openai_compatible_content(response_payload: dict[str, object]) -> str:

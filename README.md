@@ -7,6 +7,7 @@ It supports:
 - AI-reviewed Chinese transcript cleanup
 - English translation
 - Chinese SRT / English SRT / bilingual SRT generation
+- Soft subtitle extraction and ASR/SRT text merge (time-stamped text output)
 - Optional AI-based Chinese review and bilingual subtitle review (`codex` / OpenAI Official / SiliconFlow)
 - Optional hard-sub burn-in
 - Simplified Chinese aliases (`zh-CN`, `zh-Hans`, `cn`, `chinese`)
@@ -93,6 +94,10 @@ Key options:
 - `--ai-review-base-url`: optional OpenAI-compatible base URL override
 - `--no-burn`: only generate SRT files
 - `--burn-only`: skip ASR/translation and burn with existing SRT
+- `--subtitle-track`: soft subtitle track for merge (`auto` / index / language)
+- `--merge-mode`: merge ASR and soft subtitles (`ai` / `prefer-srt` / `prefer-asr`)
+- `--output-format`: merged text output format (`srt` / `txt` / `both`)
+- `--text-only`: skip hard-sub burn and generate text outputs only
 
 Environment overrides:
 - `AI_REVIEW_MODE`
@@ -117,6 +122,8 @@ For input `input.mp4` (default output dir: `output/`):
 - `output/input.en.srt`
 - `output/input.bilingual.srt`
 - `output/input.bilingual.reviewed.srt` (when AI review succeeds)
+- `output/input.merged.srt` (when merge mode is enabled)
+- `output/input.merged.txt` (when merge mode is enabled)
 - `output/input.*.mp4` (hard-sub output, if burn is enabled)
 
 ## 5. Project Structure

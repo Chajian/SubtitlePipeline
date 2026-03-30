@@ -59,6 +59,7 @@ def parse_args() -> argparse.Namespace:
             "  python auto_subtitle.py input.mp4 --ai-review on --ai-review-provider openai --ai-review-model gpt-4.1-mini\n"
             "  python auto_subtitle.py input.mp4 --ai-review on --ai-review-provider siliconflow --ai-review-model Qwen/Qwen2.5-72B-Instruct\n"
             "  python auto_subtitle.py input.mp4 --burn-only output/input.bilingual.srt\n"
+            "  python auto_subtitle.py input.mp4 --merge-mode ai --subtitle-track auto --output-format both --text-only\n"
         ),
     )
     parser.add_argument("video", help="Input video path")
@@ -127,6 +128,28 @@ def parse_args() -> argparse.Namespace:
         help="Generate SRT only and skip hard-sub burn",
     )
     parser.add_argument(
+        "--text-only",
+        action="store_true",
+        help="Skip hard-sub burn and generate text outputs only",
+    )
+    parser.add_argument(
+        "--subtitle-track",
+        default=None,
+        help="Soft subtitle track to merge (auto / index / language tag)",
+    )
+    parser.add_argument(
+        "--merge-mode",
+        choices=["ai", "prefer-srt", "prefer-asr"],
+        default=None,
+        help="Merge ASR with soft subtitles (default: disabled)",
+    )
+    parser.add_argument(
+        "--output-format",
+        choices=["srt", "txt", "both"],
+        default="both",
+        help="Merged text output format (default: both)",
+    )
+    parser.add_argument(
         "--burn-only",
         metavar="SRT",
         help="Skip ASR/translation and burn with existing SRT",
@@ -146,6 +169,8 @@ def main() -> None:
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
+    if args.text_only:
+        args.no_burn = True
 
     if args.burn_only:
         srt = Path(args.burn_only)
@@ -175,8 +200,11 @@ def main() -> None:
         AIReviewSettings,
         maybe_review_bilingual_srt,
         maybe_review_text_segments,
+        merge_aligned_blocks,
         translate_text_segments_to_english,
     )
+    from subtitle.merge import align_segments, merge_blocks_prefer_asr, merge_blocks_prefer_srt
+    from subtitle.softsub import extract_softsub_segments
     from subtitle.srt import merge_bilingual, segments_to_srt
     from subtitle.transcribe import preflight_model_access, transcribe_speech, translate_to_english
 
@@ -204,11 +232,94 @@ def main() -> None:
         print(f"\033[1;35m  AI review model: {args.ai_review_model}\033[0m")
     if args.ai_review_base_url:
         print(f"\033[1;35m  AI review base URL: {args.ai_review_base_url}\033[0m")
+    if args.merge_mode:
+        print(f"\033[1;35m  Merge mode: {args.merge_mode}\033[0m")
+        if args.subtitle_track:
+            print(f"\033[1;35m  Subtitle track: {args.subtitle_track}\033[0m")
+        print(f"\033[1;35m  Output format: {args.output_format}\033[0m")
     print("\033[1;35m" + "=" * 50 + "\033[0m")
 
     try:
         print("\n\033[1;36m> Preflight model/network\033[0m")
         preflight_model_access()
+
+        if args.merge_mode:
+            if args.merge_mode == "ai" and args.ai_review == "off":
+                raise ValueError("--merge-mode ai requires --ai-review on or auto")
+
+            print("\n\033[1;36m> Step 1/3: transcribe source speech\033[0m")
+            asr_segments = transcribe_speech(str(video), source_language=args.source_language)
+
+            print("\n\033[1;36m> Step 2/3: extract soft subtitle track\033[0m")
+            try:
+                srt_segments = extract_softsub_segments(str(video), args.subtitle_track)
+            except Exception as exc:  # noqa: BLE001
+                print("\033[33m[warn]\033[0m Soft subtitles not found; fallback to ASR only.")
+                print(f"\033[33m[warn]\033[0m Reason: {exc}")
+                srt_segments = []
+
+            print("\n\033[1;36m> Step 3/3: merge ASR and soft subtitles\033[0m")
+            if not srt_segments:
+                merged_segments = asr_segments
+            else:
+                aligned = align_segments(asr_segments, srt_segments)
+                merged_segments: list[tuple[float, float, str]]
+                if args.merge_mode == "ai":
+                    review_settings = AIReviewSettings(
+                        mode=config.AI_REVIEW_MODE,
+                        provider=config.AI_REVIEW_PROVIDER,
+                        command=config.AI_REVIEW_COMMAND,
+                        model=config.AI_REVIEW_MODEL,
+                        base_url=config.AI_REVIEW_BASE_URL,
+                        max_blocks_per_chunk=config.AI_REVIEW_MAX_BLOCKS_PER_CHUNK,
+                        max_chars_per_chunk=config.AI_REVIEW_MAX_CHARS_PER_CHUNK,
+                        timeout_seconds=config.AI_REVIEW_TIMEOUT_SECONDS,
+                        max_attempts=config.AI_REVIEW_MAX_ATTEMPTS,
+                    )
+                    try:
+                        merged_segments = merge_aligned_blocks(aligned, review_settings)
+                    except Exception as exc:  # noqa: BLE001
+                        if args.ai_review == "auto":
+                            print(
+                                "\033[33m[AI]\033[0m AI merge skipped; "
+                                "falling back to soft subtitles."
+                            )
+                            print(f"\033[33m[AI]\033[0m Reason: {exc}")
+                            merged_segments = merge_blocks_prefer_srt(aligned)
+                        else:
+                            raise
+                elif args.merge_mode == "prefer-asr":
+                    merged_segments = merge_blocks_prefer_asr(aligned)
+                else:
+                    merged_segments = merge_blocks_prefer_srt(aligned)
+
+            merged_srt = output_dir / f"{stem}.merged.srt"
+            merged_txt = output_dir / f"{stem}.merged.txt"
+            need_srt = args.output_format in {"srt", "both"} or not args.no_burn
+            if need_srt:
+                segments_to_srt(merged_segments, merged_srt)
+            if args.output_format in {"txt", "both"}:
+                from subtitle.srt import segments_to_txt
+
+                segments_to_txt(merged_segments, merged_txt)
+
+            if not args.no_burn:
+                print("\n\033[1;36m> Burn merged subtitles\033[0m")
+                output_video = output_dir / f"{stem}.merged.hardsub.mp4"
+                burn_subtitles(str(video), str(merged_srt), str(output_video))
+
+            print()
+            print("\033[1;32m" + "=" * 50 + "\033[0m")
+            print("\033[1;32m  Completed (Merged Text)\033[0m")
+            print(f"\033[1;32m  Output dir: {output_dir.resolve()}\033[0m")
+            if args.output_format in {"srt", "both"}:
+                print(f"  Merged SRT:  {merged_srt}")
+            if args.output_format in {"txt", "both"}:
+                print(f"  Merged TXT:  {merged_txt}")
+            if not args.no_burn:
+                print(f"  Hard-sub video: {output_video}")
+            print("\033[1;32m" + "=" * 50 + "\033[0m")
+            return
 
         print(f"\n\033[1;36m> Step 1/{total_steps}: transcribe source speech\033[0m")
         cn_segments = transcribe_speech(str(video), source_language=args.source_language)
