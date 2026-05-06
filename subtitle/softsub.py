@@ -21,12 +21,30 @@ class SubtitleStream:
 
 _PREFERRED_ZH = {"zh", "zho", "chi", "zh-cn", "zh-hans", "chs", "cht"}
 _PREFERRED_EN = {"en", "eng"}
+_LANGUAGE_ALIASES = {
+    "zh": ("zh", "zho", "chi", "zh-cn", "zh-hans", "chs", "cht"),
+    "en": ("en", "eng"),
+    "ja": ("ja", "jpn"),
+}
 
 
 def _normalize_language(value: str | None) -> str | None:
     if not value:
         return None
     return value.strip().lower().replace("_", "-")
+
+
+def _normalize_source_language(value: str | None) -> str | None:
+    normalized = _normalize_language(value)
+    if not normalized:
+        return None
+    alias_map = {
+        "zh-cn": "zh",
+        "zh-hans": "zh",
+        "cn": "zh",
+        "chinese": "zh",
+    }
+    return alias_map.get(normalized, normalized)
 
 
 def list_subtitle_streams(video_path: str | Path) -> list[SubtitleStream]:
@@ -78,11 +96,34 @@ def list_subtitle_streams(video_path: str | Path) -> list[SubtitleStream]:
     return results
 
 
-def _select_stream(streams: list[SubtitleStream], track: str | None) -> SubtitleStream:
+def _language_preferences(source_language: str | None) -> list[str]:
+    normalized = _normalize_source_language(source_language)
+    if not normalized:
+        return []
+
+    preferences = list(_LANGUAGE_ALIASES.get(normalized, (normalized,)))
+    if "-" in normalized:
+        base = normalized.split("-", 1)[0]
+        for candidate in _LANGUAGE_ALIASES.get(base, (base,)):
+            if candidate not in preferences:
+                preferences.append(candidate)
+    return preferences
+
+
+def _select_stream(
+    streams: list[SubtitleStream],
+    track: str | None,
+    *,
+    source_language: str | None = None,
+) -> SubtitleStream:
     if not streams:
         raise RuntimeError("no subtitle streams found")
 
     if track is None or track.strip().lower() == "auto":
+        for lang in _language_preferences(source_language):
+            for stream in streams:
+                if stream.language == lang:
+                    return stream
         for lang in _PREFERRED_ZH:
             for stream in streams:
                 if stream.language == lang:
@@ -117,10 +158,15 @@ def _flatten_text(value: str) -> str:
     return " ".join(part.strip() for part in value.splitlines() if part.strip())
 
 
-def extract_softsub_segments(video_path: str | Path, track: str | None = None) -> list[tuple[float, float, str]]:
+def extract_softsub_segments(
+    video_path: str | Path,
+    track: str | None = None,
+    *,
+    source_language: str | None = None,
+) -> list[tuple[float, float, str]]:
     """Extract soft subtitle track into (start, end, text) segments."""
     streams = list_subtitle_streams(video_path)
-    selected = _select_stream(streams, track)
+    selected = _select_stream(streams, track, source_language=source_language)
 
     command = [
         "ffmpeg",

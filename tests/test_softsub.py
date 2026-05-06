@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from subtitle.softsub import extract_softsub_segments
+from subtitle.softsub import SubtitleStream, _select_stream, extract_softsub_segments
 
 
 class SoftSubExtractTest(unittest.TestCase):
@@ -39,6 +39,17 @@ class SoftSubExtractTest(unittest.TestCase):
         self.assertEqual(segments[0][2], "Ni hao Shi jie")
         self.assertIn("-map", commands[1])
         self.assertIn("0:s:1", commands[1])
+
+    def test_select_stream_auto_prefers_source_language(self) -> None:
+        streams = [
+            SubtitleStream(stream_index=2, subtitle_index=0, language="zho"),
+            SubtitleStream(stream_index=3, subtitle_index=1, language="jpn"),
+            SubtitleStream(stream_index=4, subtitle_index=2, language="eng"),
+        ]
+
+        selected = _select_stream(streams, "auto", source_language="ja")
+
+        self.assertEqual(selected.stream_index, 3)
 
 
 def _make_completed(stdout: str, returncode: int = 0):

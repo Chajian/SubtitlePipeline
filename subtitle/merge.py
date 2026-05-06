@@ -35,15 +35,13 @@ def align_segments(
     """Align ASR and SRT segments by time proximity."""
     asr_sorted = sorted(asr_segments, key=lambda item: item[0])
     srt_sorted = sorted(srt_segments, key=lambda item: item[0])
-    used_srt_indices: set[int] = set()
+    matched_srt_indices: set[int] = set()
     aligned: list[AlignedBlock] = []
 
     for asr_start, asr_end, asr_text in asr_sorted:
         best_index = None
         best_score = float("-inf")
         for idx, (srt_start, srt_end, _srt_text) in enumerate(srt_sorted):
-            if idx in used_srt_indices:
-                continue
             if srt_start > asr_end + max_gap:
                 break
             if srt_end < asr_start - max_gap:
@@ -55,7 +53,7 @@ def align_segments(
 
         srt_text = ""
         if best_index is not None:
-            used_srt_indices.add(best_index)
+            matched_srt_indices.add(best_index)
             srt_text = srt_sorted[best_index][2]
 
         aligned.append(
@@ -69,7 +67,7 @@ def align_segments(
         )
 
     for idx, (srt_start, srt_end, srt_text) in enumerate(srt_sorted):
-        if idx in used_srt_indices:
+        if idx in matched_srt_indices:
             continue
         aligned.append(
             AlignedBlock(
