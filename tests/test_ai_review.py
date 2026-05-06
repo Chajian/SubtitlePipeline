@@ -5,6 +5,7 @@ import shutil
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import URLError
 from uuid import uuid4
 
 from subtitle.ai_review import (
@@ -17,11 +18,13 @@ from subtitle.ai_review import (
     _validate_bilingual_review_response,
     _validate_text_review_response,
     _validate_text_translation_response,
+    preflight_ai_review_access,
     load_bilingual_srt,
     text_blocks_to_segments,
     segments_to_text_blocks,
     write_bilingual_srt,
 )
+from subtitle.debug_trace import DebugTrace
 
 
 class AIReviewHelpersTest(unittest.TestCase):
@@ -32,6 +35,16 @@ class AIReviewHelpersTest(unittest.TestCase):
         temp_dir.mkdir(parents=True, exist_ok=True)
         self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
         return temp_dir
+
+    def test_debug_trace_skips_disk_writes_when_disabled(self) -> None:
+        temp_dir = self._make_temp_dir()
+        trace = DebugTrace(mode="web", root=temp_dir, enabled=False)
+
+        trace.write_manifest({"job_id": "job-123"})
+        trace.append_timeline({"stage": "reviewing"})
+
+        self.assertFalse((temp_dir / "manifest.json").exists())
+        self.assertFalse((temp_dir / "timeline.jsonl").exists())
 
     def test_load_bilingual_srt_reads_primary_and_english_lines(self) -> None:
         temp_dir = self._make_temp_dir()
@@ -201,6 +214,37 @@ class AIReviewHelpersTest(unittest.TestCase):
         self.assertEqual(blocks[0].index, 1)
         self.assertEqual(blocks[0].text, "ni hao")
         self.assertEqual(restored, segments)
+
+    def test_preflight_ai_review_access_skips_codex_provider(self) -> None:
+        settings = AIReviewSettings(mode="on", provider="codex")
+
+        with patch("subtitle.ai_review.urllib_request.urlopen") as mocked_urlopen:
+            preflight_ai_review_access(settings)
+
+        mocked_urlopen.assert_not_called()
+
+    def test_preflight_ai_review_access_raises_clear_error_when_socket_blocked(self) -> None:
+        settings = AIReviewSettings(
+            mode="on",
+            provider="siliconflow",
+            model="Pro/MiniMaxAI/MiniMax-M2.5",
+            base_url="https://api.siliconflow.cn/v1",
+        )
+
+        with (
+            patch.dict(os.environ, {"SILICONFLOW_API_KEY": "silicon-key"}, clear=True),
+            patch(
+                "subtitle.ai_review.urllib_request.urlopen",
+                side_effect=URLError(
+                    OSError(
+                        10013,
+                        "An attempt was made to access a socket in a way forbidden by its access permissions",
+                    )
+                ),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Outbound network appears blocked"):
+                preflight_ai_review_access(settings)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -43,6 +44,44 @@ def _convert_zh_segments(
 
     converter = OpenCC(convert_mode)
     return [(start, end, converter.convert(text)) for start, end, text in segments]
+
+
+def _progress_artifact(path: str | Path, kind: str) -> dict[str, str]:
+    artifact_path = Path(path)
+    return {
+        "name": artifact_path.name,
+        "kind": kind,
+        "status": "ready",
+    }
+
+
+def _write_web_progress(
+    progress_path: str | Path | None,
+    *,
+    primary_status: str,
+    enhancement_status: str,
+    current_stage: str,
+    artifacts: list[dict[str, str]] | None = None,
+    primary_error_text: str | None = None,
+    enhancement_error_text: str | None = None,
+) -> None:
+    if not progress_path:
+        return
+
+    payload = {
+        "primary_status": primary_status,
+        "enhancement_status": enhancement_status,
+        "current_stage": current_stage,
+        "artifacts": artifacts or [],
+        "primary_error_text": primary_error_text,
+        "enhancement_error_text": enhancement_error_text,
+    }
+    target = Path(progress_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -154,6 +193,16 @@ def parse_args() -> argparse.Namespace:
         metavar="SRT",
         help="Skip ASR/translation and burn with existing SRT",
     )
+    parser.add_argument(
+        "--web-progress-file",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--retry-enhancement",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     return parser.parse_args()
 
 
@@ -198,9 +247,12 @@ def main() -> None:
 
     from subtitle.ai_review import (
         AIReviewSettings,
+        load_text_srt,
         maybe_review_bilingual_srt,
         maybe_review_text_segments,
         merge_aligned_blocks,
+        preflight_ai_review_access,
+        text_blocks_to_segments,
         translate_text_segments_to_english,
     )
     from subtitle.merge import align_segments, merge_blocks_prefer_asr, merge_blocks_prefer_srt
@@ -243,6 +295,126 @@ def main() -> None:
         print("\n\033[1;36m> Preflight model/network\033[0m")
         preflight_model_access()
 
+        if args.ai_review != "off":
+            review_settings = AIReviewSettings(
+                mode=config.AI_REVIEW_MODE,
+                provider=config.AI_REVIEW_PROVIDER,
+                command=config.AI_REVIEW_COMMAND,
+                model=config.AI_REVIEW_MODEL,
+                base_url=config.AI_REVIEW_BASE_URL,
+                max_blocks_per_chunk=config.AI_REVIEW_MAX_BLOCKS_PER_CHUNK,
+                max_chars_per_chunk=config.AI_REVIEW_MAX_CHARS_PER_CHUNK,
+                timeout_seconds=config.AI_REVIEW_TIMEOUT_SECONDS,
+                max_attempts=config.AI_REVIEW_MAX_ATTEMPTS,
+            )
+            print("\033[36m[AI]\033[0m Preflight AI review connectivity")
+            preflight_ai_review_access(review_settings)
+
+        if args.retry_enhancement:
+            if args.ai_review == "off":
+                raise ValueError("--retry-enhancement requires AI review to be enabled")
+
+            cn_srt = output_dir / f"{stem}.cn.srt"
+            en_srt = output_dir / f"{stem}.en.srt"
+            bilingual_srt = output_dir / f"{stem}.bilingual.srt"
+            reviewed_cn_srt = output_dir / f"{stem}.cn.reviewed.srt"
+            reviewed_srt = output_dir / f"{stem}.bilingual.reviewed.srt"
+
+            if not cn_srt.exists():
+                raise ValueError(f"draft Chinese SRT not found: {cn_srt}")
+
+            cn_segments = text_blocks_to_segments(load_text_srt(cn_srt))
+            draft_artifacts = [_progress_artifact(cn_srt, "draft_subtitle")]
+            if en_srt.exists():
+                draft_artifacts.append(_progress_artifact(en_srt, "draft_translation"))
+            if bilingual_srt.exists():
+                draft_artifacts.append(_progress_artifact(bilingual_srt, "draft_bilingual_subtitle"))
+
+            _write_web_progress(
+                args.web_progress_file,
+                primary_status="draft_ready",
+                enhancement_status="reviewing",
+                current_stage="reviewing",
+                artifacts=draft_artifacts,
+            )
+
+            active_cn_segments = cn_segments
+            ai_cn_review_applied = False
+            ai_bilingual_review_applied = False
+            enhancement_failed = False
+            enhancement_error_text: str | None = None
+
+            print("\n\033[1;36m> Retry enhancement: review Chinese subtitles\033[0m")
+            try:
+                active_cn_segments, ai_cn_review_applied = maybe_review_text_segments(
+                    cn_segments,
+                    reviewed_cn_srt,
+                    review_settings,
+                )
+            except Exception as exc:  # noqa: BLE001
+                enhancement_failed = True
+                enhancement_error_text = str(exc)
+                active_cn_segments = cn_segments
+                print("\033[33m[AI]\033[0m Chinese subtitle review failed; using draft subtitles.")
+                print(f"\033[33m[AI]\033[0m Reason: {exc}")
+
+            active_bilingual_srt = bilingual_srt
+            if not enhancement_failed:
+                print("\n\033[1;36m> Retry enhancement: translate reviewed Chinese subtitles to english\033[0m")
+                try:
+                    en_segments = translate_text_segments_to_english(active_cn_segments, review_settings)
+                    segments_to_srt(en_segments, en_srt)
+                    if not any(item["name"] == en_srt.name for item in draft_artifacts):
+                        draft_artifacts.append(_progress_artifact(en_srt, "draft_translation"))
+                    merge_bilingual(active_cn_segments, en_segments, bilingual_srt)
+                    if not any(item["name"] == bilingual_srt.name for item in draft_artifacts):
+                        draft_artifacts.append(_progress_artifact(bilingual_srt, "draft_bilingual_subtitle"))
+                except Exception as exc:  # noqa: BLE001
+                    enhancement_failed = True
+                    enhancement_error_text = str(exc)
+                    print("\033[33m[AI]\033[0m Reviewed-text English translation failed; keeping draft bilingual subtitles.")
+                    print(f"\033[33m[AI]\033[0m Reason: {exc}")
+
+            if not enhancement_failed:
+                print("\n\033[1;36m> Retry enhancement: optional bilingual subtitle review\033[0m")
+                try:
+                    active_bilingual_srt, ai_bilingual_review_applied = maybe_review_bilingual_srt(
+                        bilingual_srt,
+                        reviewed_srt,
+                        review_settings,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    enhancement_failed = True
+                    enhancement_error_text = str(exc)
+                    active_bilingual_srt = bilingual_srt
+                    print("\033[33m[AI]\033[0m Bilingual subtitle review failed; keeping draft bilingual subtitles.")
+                    print(f"\033[33m[AI]\033[0m Reason: {exc}")
+
+            final_artifacts = list(draft_artifacts)
+            if ai_cn_review_applied:
+                final_artifacts.append(_progress_artifact(reviewed_cn_srt, "reviewed_subtitle"))
+            if ai_bilingual_review_applied:
+                final_artifacts.append(_progress_artifact(active_bilingual_srt, "reviewed_bilingual_subtitle"))
+
+            if enhancement_failed:
+                _write_web_progress(
+                    args.web_progress_file,
+                    primary_status="draft_ready",
+                    enhancement_status="failed",
+                    current_stage="draft_ready",
+                    artifacts=final_artifacts,
+                    enhancement_error_text=enhancement_error_text,
+                )
+            else:
+                _write_web_progress(
+                    args.web_progress_file,
+                    primary_status="completed",
+                    enhancement_status="succeeded",
+                    current_stage="completed",
+                    artifacts=final_artifacts,
+                )
+            return
+
         if args.merge_mode:
             if args.merge_mode == "ai" and args.ai_review == "off":
                 raise ValueError("--merge-mode ai requires --ai-review on or auto")
@@ -252,7 +424,11 @@ def main() -> None:
 
             print("\n\033[1;36m> Step 2/3: extract soft subtitle track\033[0m")
             try:
-                srt_segments = extract_softsub_segments(str(video), args.subtitle_track)
+                srt_segments = extract_softsub_segments(
+                    str(video),
+                    args.subtitle_track,
+                    source_language=args.source_language,
+                )
             except Exception as exc:  # noqa: BLE001
                 print("\033[33m[warn]\033[0m Soft subtitles not found; fallback to ASR only.")
                 print(f"\033[33m[warn]\033[0m Reason: {exc}")
@@ -265,17 +441,6 @@ def main() -> None:
                 aligned = align_segments(asr_segments, srt_segments)
                 merged_segments: list[tuple[float, float, str]]
                 if args.merge_mode == "ai":
-                    review_settings = AIReviewSettings(
-                        mode=config.AI_REVIEW_MODE,
-                        provider=config.AI_REVIEW_PROVIDER,
-                        command=config.AI_REVIEW_COMMAND,
-                        model=config.AI_REVIEW_MODEL,
-                        base_url=config.AI_REVIEW_BASE_URL,
-                        max_blocks_per_chunk=config.AI_REVIEW_MAX_BLOCKS_PER_CHUNK,
-                        max_chars_per_chunk=config.AI_REVIEW_MAX_CHARS_PER_CHUNK,
-                        timeout_seconds=config.AI_REVIEW_TIMEOUT_SECONDS,
-                        max_attempts=config.AI_REVIEW_MAX_ATTEMPTS,
-                    )
                     try:
                         merged_segments = merge_aligned_blocks(aligned, review_settings)
                     except Exception as exc:  # noqa: BLE001
@@ -292,6 +457,12 @@ def main() -> None:
                     merged_segments = merge_blocks_prefer_asr(aligned)
                 else:
                     merged_segments = merge_blocks_prefer_srt(aligned)
+
+            source_lang = args.source_language.strip().lower().replace("_", "-")
+            is_zh_source = source_lang in {"zh", "zh-cn", "zh-hans", "cn", "chinese"} or source_lang.startswith("zh-")
+            if is_zh_source and args.zh_script != "raw":
+                print(f"\033[36m[text]\033[0m Convert Chinese script -> {args.zh_script}")
+                merged_segments = _convert_zh_segments(merged_segments, args.zh_script)
 
             merged_srt = output_dir / f"{stem}.merged.srt"
             merged_txt = output_dir / f"{stem}.merged.txt"
@@ -322,6 +493,12 @@ def main() -> None:
             return
 
         print(f"\n\033[1;36m> Step 1/{total_steps}: transcribe source speech\033[0m")
+        _write_web_progress(
+            args.web_progress_file,
+            primary_status="transcribing",
+            enhancement_status="pending",
+            current_stage="transcribing",
+        )
         cn_segments = transcribe_speech(str(video), source_language=args.source_language)
         source_lang = args.source_language.strip().lower().replace("_", "-")
         is_zh_source = source_lang in {"zh", "zh-cn", "zh-hans", "cn", "chinese"} or source_lang.startswith("zh-")
@@ -330,65 +507,127 @@ def main() -> None:
             cn_segments = _convert_zh_segments(cn_segments, args.zh_script)
         cn_srt = output_dir / f"{stem}.cn.srt"
         segments_to_srt(cn_segments, cn_srt)
+        draft_artifacts = [_progress_artifact(cn_srt, "draft_subtitle")]
+        if not cn_segments:
+            print("\033[33m[warn]\033[0m No speech segments were detected; downstream subtitle steps were skipped.")
+            en_srt = output_dir / f"{stem}.en.srt"
+            bilingual_srt = output_dir / f"{stem}.bilingual.srt"
+            segments_to_srt([], en_srt)
+            segments_to_srt([], bilingual_srt)
+            draft_artifacts.extend(
+                [
+                    _progress_artifact(en_srt, "draft_translation"),
+                    _progress_artifact(bilingual_srt, "draft_bilingual_subtitle"),
+                ]
+            )
+            _write_web_progress(
+                args.web_progress_file,
+                primary_status="completed",
+                enhancement_status="skipped",
+                current_stage="completed",
+                artifacts=draft_artifacts,
+            )
+
+            print()
+            print("\033[1;32m" + "=" * 50 + "\033[0m")
+            print("\033[1;32m  Completed (No Speech Detected)\033[0m")
+            print(f"\033[1;32m  Output dir: {output_dir.resolve()}\033[0m")
+            print(f"  Chinese SRT:   {cn_srt}")
+            if args.ai_review != "off":
+                print("  Reviewed CN:   skipped (no subtitle blocks to review)")
+            print(f"  English SRT:   {en_srt}")
+            print(f"  Bilingual SRT: {bilingual_srt}")
+            if args.ai_review != "off":
+                print("  Reviewed SRT:  skipped (no subtitle blocks to review)")
+            if not args.no_burn:
+                print("  Burn source:   skipped (no subtitle blocks to burn)")
+                print("  Hard-sub video: skipped")
+            print("\033[1;32m" + "=" * 50 + "\033[0m")
+            return
         reviewed_cn_srt = output_dir / f"{stem}.cn.reviewed.srt"
         active_cn_segments = cn_segments
         ai_cn_review_applied = False
-
-        review_settings = AIReviewSettings(
-            mode=config.AI_REVIEW_MODE,
-            provider=config.AI_REVIEW_PROVIDER,
-            command=config.AI_REVIEW_COMMAND,
-            model=config.AI_REVIEW_MODEL,
-            base_url=config.AI_REVIEW_BASE_URL,
-            max_blocks_per_chunk=config.AI_REVIEW_MAX_BLOCKS_PER_CHUNK,
-            max_chars_per_chunk=config.AI_REVIEW_MAX_CHARS_PER_CHUNK,
-            timeout_seconds=config.AI_REVIEW_TIMEOUT_SECONDS,
-            max_attempts=config.AI_REVIEW_MAX_ATTEMPTS,
-        )
+        enhancement_failed = False
+        enhancement_error_text: str | None = None
 
         if args.ai_review != "off":
             print(f"\n\033[1;36m> Step 2/{total_steps}: review Chinese subtitles\033[0m")
-            active_cn_segments, ai_cn_review_applied = maybe_review_text_segments(
-                cn_segments,
-                reviewed_cn_srt,
-                review_settings,
+            _write_web_progress(
+                args.web_progress_file,
+                primary_status="draft_ready",
+                enhancement_status="reviewing",
+                current_stage="reviewing",
+                artifacts=draft_artifacts,
             )
+            try:
+                active_cn_segments, ai_cn_review_applied = maybe_review_text_segments(
+                    cn_segments,
+                    reviewed_cn_srt,
+                    review_settings,
+                )
+            except Exception as exc:  # noqa: BLE001
+                enhancement_failed = True
+                enhancement_error_text = str(exc)
+                active_cn_segments = cn_segments
+                print("\033[33m[AI]\033[0m Chinese subtitle review failed; using draft subtitles.")
+                print(f"\033[33m[AI]\033[0m Reason: {exc}")
 
         if args.ai_review != "off":
             print(f"\n\033[1;36m> Step 3/{total_steps}: translate reviewed Chinese subtitles to english\033[0m")
-            try:
-                en_segments = translate_text_segments_to_english(active_cn_segments, review_settings)
-            except Exception as exc:  # noqa: BLE001
-                if args.ai_review in {"on", "auto"}:
+            if enhancement_failed:
+                en_segments = translate_to_english(str(video), source_language=args.source_language)
+            else:
+                try:
+                    en_segments = translate_text_segments_to_english(active_cn_segments, review_settings)
+                except Exception as exc:  # noqa: BLE001
+                    enhancement_failed = True
+                    enhancement_error_text = str(exc)
                     print(
                         "\033[33m[AI]\033[0m Reviewed-text English translation failed; "
                         "falling back to Whisper audio translation."
                     )
                     print(f"\033[33m[AI]\033[0m Reason: {exc}")
+                    active_cn_segments = cn_segments
                     en_segments = translate_to_english(str(video), source_language=args.source_language)
-                else:
-                    raise
         else:
             print(f"\n\033[1;36m> Step 2/{total_steps}: translate to english\033[0m")
             en_segments = translate_to_english(str(video), source_language=args.source_language)
         en_srt = output_dir / f"{stem}.en.srt"
         segments_to_srt(en_segments, en_srt)
+        draft_artifacts.append(_progress_artifact(en_srt, "draft_translation"))
 
         merge_step = 4 if args.ai_review != "off" else 3
         print(f"\n\033[1;36m> Step {merge_step}/{total_steps}: merge bilingual subtitles\033[0m")
         bilingual_srt = output_dir / f"{stem}.bilingual.srt"
         merge_bilingual(active_cn_segments, en_segments, bilingual_srt)
+        draft_artifacts.append(_progress_artifact(bilingual_srt, "draft_bilingual_subtitle"))
         reviewed_srt = output_dir / f"{stem}.bilingual.reviewed.srt"
         active_bilingual_srt = bilingual_srt
         ai_bilingual_review_applied = False
 
         if args.ai_review != "off":
             print(f"\n\033[1;36m> Step 5/{total_steps}: optional bilingual subtitle review\033[0m")
-            active_bilingual_srt, ai_bilingual_review_applied = maybe_review_bilingual_srt(
-                bilingual_srt,
-                reviewed_srt,
-                review_settings,
+            _write_web_progress(
+                args.web_progress_file,
+                primary_status="draft_ready",
+                enhancement_status="reviewing" if not enhancement_failed else "failed",
+                current_stage="reviewing" if not enhancement_failed else "draft_ready",
+                artifacts=draft_artifacts,
+                enhancement_error_text=enhancement_error_text,
             )
+            if not enhancement_failed:
+                try:
+                    active_bilingual_srt, ai_bilingual_review_applied = maybe_review_bilingual_srt(
+                        bilingual_srt,
+                        reviewed_srt,
+                        review_settings,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    enhancement_failed = True
+                    enhancement_error_text = str(exc)
+                    active_bilingual_srt = bilingual_srt
+                    print("\033[33m[AI]\033[0m Bilingual subtitle review failed; keeping draft bilingual subtitles.")
+                    print(f"\033[33m[AI]\033[0m Reason: {exc}")
 
         burn_step = total_steps
 
@@ -400,12 +639,49 @@ def main() -> None:
             burn_subtitles(str(video), str(active_bilingual_srt), str(output_video))
 
     except KeyboardInterrupt:
+        _write_web_progress(
+            args.web_progress_file,
+            primary_status="failed",
+            enhancement_status="pending",
+            current_stage="failed",
+            primary_error_text="cancelled by user",
+        )
         print("\n\033[31m[interrupted]\033[0m cancelled by user")
         sys.exit(130)
     except Exception as exc:  # noqa: BLE001
+        _write_web_progress(
+            args.web_progress_file,
+            primary_status="failed",
+            enhancement_status="pending",
+            current_stage="failed",
+            primary_error_text=str(exc),
+        )
         print("\n\033[31m[error]\033[0m subtitle generation failed")
         print(f"  {exc}")
         sys.exit(1)
+
+    final_artifacts = list(draft_artifacts)
+    if args.ai_review != "off" and ai_cn_review_applied:
+        final_artifacts.append(_progress_artifact(reviewed_cn_srt, "reviewed_subtitle"))
+    if args.ai_review != "off" and ai_bilingual_review_applied:
+        final_artifacts.append(_progress_artifact(active_bilingual_srt, "reviewed_bilingual_subtitle"))
+    if enhancement_failed:
+        _write_web_progress(
+            args.web_progress_file,
+            primary_status="draft_ready",
+            enhancement_status="failed",
+            current_stage="draft_ready",
+            artifacts=final_artifacts,
+            enhancement_error_text=enhancement_error_text,
+        )
+    else:
+        _write_web_progress(
+            args.web_progress_file,
+            primary_status="completed",
+            enhancement_status="succeeded" if args.ai_review != "off" else "skipped",
+            current_stage="completed",
+            artifacts=final_artifacts,
+        )
 
     print()
     print("\033[1;32m" + "=" * 50 + "\033[0m")

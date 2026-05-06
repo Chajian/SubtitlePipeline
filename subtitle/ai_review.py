@@ -47,7 +47,7 @@ class AIReviewSettings:
     command: str = "codex"
     model: str | None = None
     base_url: str | None = None
-    max_blocks_per_chunk: int = 80
+    max_blocks_per_chunk: int = 40
     max_chars_per_chunk: int = 12_000
     timeout_seconds: int = 600
     max_attempts: int = 2
@@ -592,6 +592,46 @@ def _run_openai_compatible_json_task(
         return json.loads(content)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"{settings.provider} API returned non-JSON content: {content}") from exc
+
+
+def preflight_ai_review_access(settings: AIReviewSettings) -> None:
+    """Validate AI review provider connectivity before long-running local work starts."""
+    if settings.mode == "off" or settings.provider == "codex":
+        return
+
+    api_key = _resolve_api_key(settings.provider)
+    base_url = _resolve_base_url(settings)
+    endpoint = base_url.rstrip("/") + "/models"
+    request = urllib_request.Request(
+        endpoint,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="GET",
+    )
+
+    try:
+        with urllib_request.urlopen(request, timeout=min(settings.timeout_seconds, 10)) as response:
+            status = getattr(response, "status", None)
+            if isinstance(status, int) and status >= 400:
+                raise RuntimeError(f"{settings.provider} API preflight failed with HTTP {status}")
+    except urllib_error.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"{settings.provider} API preflight failed with HTTP {exc.code}: {details}"
+        ) from exc
+    except urllib_error.URLError as exc:
+        reason = exc.reason
+        blocked_socket = isinstance(reason, OSError) and (
+            getattr(reason, "winerror", None) == 10013 or getattr(reason, "errno", None) == 10013
+        )
+        if blocked_socket:
+            raise RuntimeError(
+                "Outbound network appears blocked for AI review. "
+                f"Cannot reach {endpoint}. Original error: {reason}"
+            ) from exc
+        raise RuntimeError(f"{settings.provider} API preflight failed: {reason}") from exc
 
 
 def _resolve_api_key(provider: str) -> str:

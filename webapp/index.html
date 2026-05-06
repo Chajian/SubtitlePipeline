@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Subtitle Pipeline Web</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4efe6;
+      --panel: #fffaf2;
+      --ink: #1b1f23;
+      --muted: #6b7280;
+      --line: #d7c9b1;
+      --accent: #b8562a;
+      --accent-dark: #8f3f1c;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(184, 86, 42, 0.18), transparent 28%),
+        linear-gradient(180deg, #f8f1e6 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3.4rem);
+    }
+
+    p { color: var(--muted); }
+
+    .grid {
+      display: grid;
+      gap: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      margin-top: 24px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: 0 14px 40px rgba(27, 31, 35, 0.08);
+    }
+
+    label {
+      display: block;
+      font-size: 0.95rem;
+      margin-bottom: 12px;
+    }
+
+    input, select, button, textarea {
+      width: 100%;
+      margin-top: 6px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      font-weight: 600;
+    }
+
+    button:hover { background: var(--accent-dark); }
+
+    .inline {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin: 12px 0;
+      flex-wrap: wrap;
+    }
+
+    .inline label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+    }
+
+    .inline input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+    }
+
+    pre {
+      margin: 0;
+      padding: 14px;
+      border-radius: 12px;
+      background: #201a17;
+      color: #f4efe6;
+      overflow: auto;
+      min-height: 180px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .status {
+      font-weight: 600;
+      color: var(--accent-dark);
+    }
+
+    .submit-status {
+      min-height: 1.4em;
+      margin: 12px 0 0;
+      font-size: 0.92rem;
+    }
+
+    .submit-status.is-error {
+      color: #9c3429;
+    }
+
+    .status-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      margin-top: 12px;
+    }
+
+    .status-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fffdf9;
+      padding: 14px;
+    }
+
+    .status-card-label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-bottom: 8px;
+    }
+
+    .status-card-value {
+      display: block;
+      color: var(--ink);
+      font-size: 1.2rem;
+      font-weight: 700;
+      line-height: 1.2;
+      word-break: break-word;
+    }
+
+    .history-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .history-empty {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .history-item {
+      width: 100%;
+      text-align: left;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fffdf9;
+      color: var(--ink);
+    }
+
+    .history-item.is-selected {
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 1px var(--accent);
+      background: #fff3eb;
+    }
+
+    .history-item-header,
+    .history-item-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .history-item-header {
+      margin-bottom: 8px;
+    }
+
+    .history-name {
+      font-weight: 600;
+      word-break: break-word;
+    }
+
+    .history-time {
+      color: var(--muted);
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+
+    .badge.queued,
+    .badge.uploaded,
+    .badge.pending {
+      background: #efe7da;
+      color: #8f5d23;
+    }
+
+    .badge.running,
+    .badge.transcribing,
+    .badge.reviewing {
+      background: #e3f0ec;
+      color: #1f6b59;
+    }
+
+    .badge.succeeded,
+    .badge.completed,
+    .badge.draft_ready,
+    .badge.skipped {
+      background: #e2f3df;
+      color: #22643b;
+    }
+
+    .badge.failed, .badge.cancelled {
+      background: #f6e0dd;
+      color: #9c3429;
+    }
+
+    .detail-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .detail-list li {
+      color: var(--muted);
+    }
+
+    .detail-list strong {
+      color: var(--ink);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Subtitle Pipeline Web</h1>
+    <p>上传视频，提交字幕任务，并实时查看处理状态与日志。</p>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>新任务</h2>
+        <form id="job-form">
+          <label>
+            视频文件
+            <input name="video" type="file" accept=".mp4,.mov,.mkv,.avi,.mts" required>
+          </label>
+
+          <label>
+            模型
+            <select name="model">
+              <option value="small">small</option>
+              <option value="medium" selected>medium</option>
+              <option value="large-v3">large-v3</option>
+            </select>
+          </label>
+
+          <label>
+            中文字形
+            <select name="zh_script">
+              <option value="simplified" selected>simplified</option>
+              <option value="traditional">traditional</option>
+            </select>
+          </label>
+
+          <div class="inline">
+            <label><input name="burn_subtitles" type="checkbox" checked> 烧录字幕</label>
+            <label><input name="ai_review" type="checkbox" checked> AI 校对</label>
+          </div>
+
+          <button id="submit-button" type="submit">提交任务</button>
+          <p id="submit-status" class="submit-status" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>公共状态</h2>
+        <p id="public-status" class="status">加载中...</p>
+        <div id="public-status-cards" class="status-grid">
+          <div class="status-card">
+            <span class="status-card-label">可接单</span>
+            <span class="status-card-value">--</span>
+          </div>
+          <div class="status-card">
+            <span class="status-card-label">今日剩余</span>
+            <span class="status-card-value">--</span>
+          </div>
+          <div class="status-card">
+            <span class="status-card-label">排队中</span>
+            <span class="status-card-value">--</span>
+          </div>
+          <div class="status-card">
+            <span class="status-card-label">运行中</span>
+            <span class="status-card-value">--</span>
+          </div>
+          <div class="status-card">
+            <span class="status-card-label">上传上限</span>
+            <span class="status-card-value">--</span>
+          </div>
+          <div class="status-card">
+            <span class="status-card-label">队列上限</span>
+            <span class="status-card-value">--</span>
+          </div>
+        </div>
+        <button type="button" id="refresh-status">刷新状态</button>
+      </section>
+
+      <section class="panel">
+        <h2>历史任务</h2>
+        <p id="job-history-empty" class="history-empty">加载任务列表中...</p>
+        <div id="job-history" class="history-list"></div>
+      </section>
+    </div>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>任务详情</h2>
+        <ul id="job-status" class="detail-list">
+          <li>尚未选择任务。</li>
+        </ul>
+        <ul id="job-files"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>任务日志</h2>
+        <pre id="job-log">等待任务开始...</pre>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const publicStatusEl = document.getElementById("public-status");
+    const publicStatusCardsEl = document.getElementById("public-status-cards");
+    const jobStatusEl = document.getElementById("job-status");
+    const jobFilesEl = document.getElementById("job-files");
+    const jobLogEl = document.getElementById("job-log");
+    const jobHistoryEl = document.getElementById("job-history");
+    const jobHistoryEmptyEl = document.getElementById("job-history-empty");
+    const formEl = document.getElementById("job-form");
+    const submitButtonEl = document.getElementById("submit-button");
+    const submitStatusEl = document.getElementById("submit-status");
+    const terminalPrimaryStatuses = ["completed", "failed"];
+    let pollingTimer = null;
+    let selectedJobId = null;
+    let selectedJobTerminal = null;
+    let historyJobs = [];
+
+    async function refreshPublicStatus() {
+      const response = await fetch("/api/public/status");
+      const data = await response.json();
+      publicStatusEl.textContent = `${data.date} · ${data.accepting_jobs ? "当前可接单" : "当前暂停接单"}`;
+      publicStatusCardsEl.innerHTML = "";
+
+      const cards = [
+        ["可接单", data.accepting_jobs ? "是" : "否"],
+        ["今日剩余", `${data.remaining_quota} / ${data.daily_quota}`],
+        ["排队中", String(data.queue_length)],
+        ["运行中", String(data.running_jobs)],
+        ["上传上限", `${data.max_upload_mb} MB`],
+        ["队列上限", String(data.max_queue_size)],
+      ];
+
+      for (const [label, value] of cards) {
+        const card = document.createElement("div");
+        card.className = "status-card";
+        card.innerHTML = `
+          <span class="status-card-label">${label}</span>
+          <span class="status-card-value">${value}</span>
+        `;
+        publicStatusCardsEl.appendChild(card);
+      }
+    }
+
+    function stopPolling() {
+      if (pollingTimer) {
+        clearInterval(pollingTimer);
+        pollingTimer = null;
+      }
+    }
+
+    function normalizePrimaryStatus(job) {
+      return job.primary_status || job.status || "uploaded";
+    }
+
+    function normalizeEnhancementStatus(job) {
+      if (job.enhancement_status) {
+        return job.enhancement_status;
+      }
+      const primaryStatus = normalizePrimaryStatus(job);
+      if (primaryStatus === "completed") {
+        return "succeeded";
+      }
+      if (primaryStatus === "failed") {
+        return "pending";
+      }
+      return "pending";
+    }
+
+    function normalizeCurrentStage(job) {
+      return job.current_stage || normalizePrimaryStatus(job);
+    }
+
+    function renderStageLabel(value) {
+      const labels = {
+        uploaded: "待处理",
+        pending: "等待 AI 校对",
+        transcribing: "字幕生成中",
+        draft_ready: "初稿已就绪",
+        reviewing: "AI 校对中",
+        completed: "已完成",
+        succeeded: "已完成",
+        skipped: "已跳过",
+        failed: "失败",
+        cancelled: "已取消",
+      };
+      return labels[value] || value || "-";
+    }
+
+    function renderCompositeStatus(job) {
+      const primaryStatus = normalizePrimaryStatus(job);
+      const enhancementStatus = normalizeEnhancementStatus(job);
+      const currentStage = normalizeCurrentStage(job);
+
+      if (primaryStatus === "draft_ready" && enhancementStatus === "failed") {
+        return "AI 校对失败，初稿仍可下载";
+      }
+      if (primaryStatus === "draft_ready" && (enhancementStatus === "reviewing" || currentStage === "reviewing")) {
+        return "初稿已生成，AI 校对中";
+      }
+      if (primaryStatus === "draft_ready") {
+        return "初稿已生成，可下载";
+      }
+      if (primaryStatus === "completed") {
+        return enhancementStatus === "skipped" ? "字幕已生成，可下载" : "字幕已完成，可下载";
+      }
+      if (primaryStatus === "failed") {
+        return "字幕生成失败";
+      }
+      return renderStageLabel(currentStage);
+    }
+
+    function renderBadgeTone(job) {
+      const primaryStatus = normalizePrimaryStatus(job);
+      const enhancementStatus = normalizeEnhancementStatus(job);
+      if (primaryStatus === "draft_ready" && enhancementStatus === "reviewing") {
+        return "reviewing";
+      }
+      if (primaryStatus === "draft_ready" && enhancementStatus === "failed") {
+        return "draft_ready";
+      }
+      return normalizeCurrentStage(job);
+    }
+
+    function isJobTerminal(job) {
+      const primaryStatus = normalizePrimaryStatus(job);
+      const enhancementStatus = normalizeEnhancementStatus(job);
+      if (terminalPrimaryStatuses.includes(primaryStatus)) {
+        return true;
+      }
+      if (primaryStatus === "draft_ready") {
+        return !["pending", "reviewing"].includes(enhancementStatus);
+      }
+      return (job.status || "") === "cancelled";
+    }
+
+    function setSubmitState(message, { isSubmitting = false, isError = false } = {}) {
+      submitButtonEl.disabled = isSubmitting;
+      submitButtonEl.textContent = isSubmitting ? "提交中..." : "提交任务";
+      submitStatusEl.textContent = message || "";
+      submitStatusEl.classList.toggle("is-error", isError);
+    }
+
+    function formatTime(value) {
+      if (!value) {
+        return "-";
+      }
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return value;
+      }
+      return date.toLocaleString("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+
+    function renderJobStatus(job) {
+      jobStatusEl.innerHTML = "";
+      const primaryStatus = normalizePrimaryStatus(job);
+      const enhancementStatus = normalizeEnhancementStatus(job);
+      const currentStage = normalizeCurrentStage(job);
+
+      const rows = [
+        ["任务 ID", job.job_id],
+        ["原文件", job.original_filename],
+        ["状态摘要", renderCompositeStatus(job)],
+        ["主流程状态", renderStageLabel(primaryStatus)],
+        ["AI 校对状态", renderStageLabel(enhancementStatus)],
+        ["当前阶段", renderStageLabel(currentStage)],
+        ["兼容状态", job.status || "-"],
+        ["创建时间", formatTime(job.created_at)],
+        ["开始时间", formatTime(job.started_at)],
+        ["完成时间", formatTime(job.completed_at)],
+        ["退出码", job.exit_code ?? "-"],
+      ];
+
+      for (const [label, value] of rows) {
+        const item = document.createElement("li");
+        item.innerHTML = `<strong>${label}:</strong> ${value}`;
+        jobStatusEl.appendChild(item);
+      }
+    }
+
+    function renderFiles(jobId, files) {
+      jobFilesEl.innerHTML = "";
+      if (!files || files.length === 0) {
+        const item = document.createElement("li");
+        item.textContent = "暂无产物文件。";
+        jobFilesEl.appendChild(item);
+        return;
+      }
+      for (const file of files || []) {
+        const item = document.createElement("li");
+        const link = document.createElement("a");
+        link.href = file.url || `/api/jobs/${jobId}/files/${encodeURIComponent(file.name)}`;
+        link.textContent = `${file.name} (${file.size_bytes} bytes)`;
+        item.appendChild(link);
+        jobFilesEl.appendChild(item);
+      }
+    }
+
+    function renderJobHistory(jobs) {
+      historyJobs = jobs || [];
+      jobHistoryEl.innerHTML = "";
+      jobHistoryEmptyEl.style.display = historyJobs.length === 0 ? "block" : "none";
+      if (historyJobs.length === 0) {
+        jobHistoryEmptyEl.textContent = "暂无任务。";
+        return;
+      }
+
+      for (const job of historyJobs) {
+        const compositeStatus = renderCompositeStatus(job);
+        const badgeTone = renderBadgeTone(job);
+        const currentStage = normalizeCurrentStage(job);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `history-item${job.job_id === selectedJobId ? " is-selected" : ""}`;
+        button.addEventListener("click", () => {
+          void selectJob(job.job_id);
+        });
+
+        const timeValue = job.completed_at || job.started_at || job.created_at;
+        button.innerHTML = `
+          <div class="history-item-header">
+            <span class="history-name">${job.original_filename}</span>
+            <span class="badge ${badgeTone}">${compositeStatus}</span>
+          </div>
+          <div class="history-item-meta">
+            <span class="history-time">${formatTime(timeValue)}</span>
+            <span class="history-time">${renderStageLabel(currentStage)} · ${job.job_id}</span>
+          </div>
+        `;
+        jobHistoryEl.appendChild(button);
+      }
+    }
+
+    async function refreshJobHistory(preferredJobId = null) {
+      const response = await fetch("/api/jobs");
+      if (!response.ok) {
+        jobHistoryEl.innerHTML = "";
+        jobHistoryEmptyEl.style.display = "block";
+        jobHistoryEmptyEl.textContent = "任务列表加载失败。";
+        return;
+      }
+
+      const jobs = await response.json();
+      const nextSelectedJobId =
+        preferredJobId ||
+        selectedJobId ||
+        (jobs.length > 0 ? jobs[0].job_id : null);
+
+      if (jobs.length === 0) {
+        selectedJobId = null;
+        selectedJobTerminal = null;
+      }
+
+      renderJobHistory(jobs);
+
+      if (nextSelectedJobId && jobs.some((job) => job.job_id === nextSelectedJobId)) {
+        await selectJob(nextSelectedJobId, { refreshHistory: false });
+      }
+    }
+
+    async function loadJob(jobId) {
+      const [jobResponse, logResponse] = await Promise.all([
+        fetch(`/api/jobs/${jobId}`),
+        fetch(`/api/jobs/${jobId}/log`),
+      ]);
+
+      if (jobResponse.ok) {
+        const job = await jobResponse.json();
+        selectedJobTerminal = isJobTerminal(job);
+        renderJobStatus(job);
+        renderFiles(jobId, job.files);
+        renderJobHistory(historyJobs);
+        if (selectedJobTerminal) {
+          stopPolling();
+        }
+      } else {
+        selectedJobTerminal = null;
+        jobStatusEl.innerHTML = "<li>任务详情加载失败。</li>";
+      }
+
+      if (logResponse.ok) {
+        jobLogEl.textContent = await logResponse.text();
+      } else {
+        jobLogEl.textContent = "任务日志加载失败。";
+      }
+    }
+
+    async function selectJob(jobId, options = {}) {
+      const { refreshHistory = true } = options;
+      selectedJobId = jobId;
+      stopPolling();
+
+      if (refreshHistory) {
+        renderJobHistory(historyJobs);
+      }
+
+      await loadJob(jobId);
+
+      if (selectedJobId === jobId && selectedJobTerminal === false) {
+        pollingTimer = setInterval(() => {
+          void loadJob(jobId);
+        }, 2000);
+      }
+    }
+
+    formEl.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const formData = new FormData(formEl);
+      formData.set("burn_subtitles", formEl.elements.burn_subtitles.checked ? "on" : "off");
+      formData.set("ai_review", formEl.elements.ai_review.checked ? "on" : "off");
+      setSubmitState("正在上传并提交任务，请稍候...", { isSubmitting: true });
+
+      try {
+        const response = await fetch("/api/jobs", { method: "POST", body: formData });
+        const data = await response.json();
+        if (!response.ok) {
+          const detail = data.detail || JSON.stringify(data, null, 2);
+          jobStatusEl.innerHTML = `<li>${detail}</li>`;
+          setSubmitState(`提交失败：${detail}`, { isError: true });
+          return;
+        }
+
+        setSubmitState(`任务 ${data.job_id} 已提交，正在刷新状态...`);
+        jobLogEl.textContent = "任务已入队，开始轮询日志...";
+        renderFiles(data.job_id, []);
+        await refreshJobHistory(data.job_id);
+        setSubmitState(`任务 ${data.job_id} 已提交。`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        jobStatusEl.innerHTML = `<li>提交失败：${message}</li>`;
+        setSubmitState(`提交失败：${message}`, { isError: true });
+      } finally {
+        submitButtonEl.disabled = false;
+        submitButtonEl.textContent = "提交任务";
+      }
+    });
+
+    document.getElementById("refresh-status").addEventListener("click", refreshPublicStatus);
+    refreshPublicStatus().catch((error) => {
+      publicStatusEl.textContent = `加载失败: ${error}`;
+    });
+    refreshJobHistory().catch((error) => {
+      jobHistoryEmptyEl.style.display = "block";
+      jobHistoryEmptyEl.textContent = `任务列表加载失败: ${error}`;
+    });
+  </script>
+</body>
+</html>
